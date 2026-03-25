@@ -516,16 +516,17 @@ class TestSelfScan:
         rc, out, err = run_pinstack(PROJECT_ROOT)
         assert "Traceback" not in err
 
-    def test_self_scan_finds_unpinned_dev_deps(self):
-        """pinstack's own pyproject.toml uses unpinned dev deps (pytest, ruff, pyright)."""
+    def test_self_scan_finds_fixture_findings(self):
+        """pinstack's test fixtures contain intentionally bad files."""
         rc, out, err = run_pinstack(PROJECT_ROOT)
-        # Should find findings because dev optional-dependencies are not == pinned
+        # Should find findings from test fixtures (bad requirements files)
         assert rc == 1
 
-    def test_self_scan_output_has_pyproject_findings(self):
-        rc, out, err = run_pinstack(PROJECT_ROOT)
-        # There should be at least one finding referencing pyproject.toml
-        assert "pyproject.toml" in out
+    def test_self_scan_clean_with_fixtures_excluded(self):
+        """With fixtures excluded, pinstack's own deps are all pinned."""
+        rc, out, err = run_pinstack(PROJECT_ROOT, "--exclude-dir", "fixtures")
+        assert rc == 0
+        assert "0 findings" in out
 
     def test_self_scan_sarif_is_valid_json(self):
         rc, out, err = run_pinstack(PROJECT_ROOT, "--format", "sarif")
