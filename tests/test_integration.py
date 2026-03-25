@@ -486,10 +486,9 @@ class TestSelfScan:
     def test_self_scan_clean_with_fixtures_excluded(self):
         """With fixtures excluded, pinstack's pyproject.toml has no companion lock file."""
         rc, out, err = run_pinstack(PROJECT_ROOT, "--exclude-dir", "fixtures")
-        # pinstack's own pyproject.toml has deps but no lock file, so we expect
-        # a finding about the missing lock file.
-        assert rc == 1
-        assert "lock file" in out
+        # pinstack's own deps are pinned and requirements.txt has hashes
+        assert rc == 0
+        assert "0 findings" in out
 
     def test_self_scan_sarif_is_valid_json(self):
         rc, out, err = run_pinstack(PROJECT_ROOT, "--format", "sarif")
