@@ -1,22 +1,21 @@
 """yarn.lock checker: warns when package entries are missing an integrity line."""
 
+from __future__ import annotations
+
 import os
-from typing import Dict, Set
+from typing import Optional
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
-def _parse_yarn_lock(lines):
-    # type: (List[str]) -> List[tuple]
+def _parse_yarn_lock(lines: list[str]) -> list[tuple]:
     """
     Parse a yarn.lock file (v1 format) and return a list of
     (header_text, start_lineno, has_integrity) tuples — one per package block.
     """
-    blocks = []  # type: List[tuple]
+    blocks: list[tuple] = []
 
-    current_header = None   # type: Optional[str]
+    current_header: Optional[str] = None
     current_start = 0
     current_has_integrity = False
 
@@ -56,11 +55,10 @@ def _parse_yarn_lock(lines):
 class YarnLockChecker(Checker):
     name = "yarn_lock"
     description = "Checks yarn.lock files for package entries missing integrity hashes"
-    patterns = ["yarn.lock"]  # type: List[str]
+    patterns: list[str] = ["yarn.lock"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

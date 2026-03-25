@@ -1,8 +1,11 @@
 """Command-line interface for pinstack."""
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
+from typing import Optional
 
 import pinstack
 from pinstack.core import (
@@ -15,8 +18,7 @@ from pinstack.core import (
 )
 
 
-def _build_registry():
-    # type: () -> CheckerRegistry
+def _build_registry() -> CheckerRegistry:
     from pinstack.checkers import ALL_CHECKERS
     reg = CheckerRegistry()
     for cls in ALL_CHECKERS:
@@ -24,8 +26,7 @@ def _build_registry():
     return reg
 
 
-def _build_parser():
-    # type: () -> argparse.ArgumentParser
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pinstack",
         description="Supply-chain dependency pinning enforcement.",
@@ -101,8 +102,7 @@ def _build_parser():
     return parser
 
 
-def main(argv=None):
-    # type: (Optional[List[str]]) -> None
+def main(argv: Optional[list[str]] = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 

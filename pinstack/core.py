@@ -1,10 +1,12 @@
 """Core types: Finding, Checker base, CheckerRegistry, FileIndex, runner, formatter."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, Set
+from typing import Optional
 
 EXCLUDED_DIRS = frozenset([
     ".git", "node_modules", ".venv", "venv", "__pycache__",
@@ -15,7 +17,7 @@ DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_INDEX_SIZE = 384
 
 # FileIndex: dir_path -> set of filenames
-FileIndex = Dict[str, Set[str]]
+FileIndex = dict[str, set[str]]
 
 
 @dataclass
@@ -27,30 +29,26 @@ class Finding:
 
 
 class Checker:
-    name = ""         # type: str
-    description = ""  # type: str
-    patterns = []     # type: List[str]  -- filenames or globs e.g. ["Dockerfile*", "*.dockerfile"]
+    name: str = ""
+    description: str = ""
+    patterns: list[str] = []     # filenames or globs e.g. ["Dockerfile*", "*.dockerfile"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
         raise NotImplementedError
 
 
 class CheckerRegistry:
-    def __init__(self):
-        self._checkers = {}  # type: Dict[str, Type[Checker]]
+    def __init__(self) -> None:
+        self._checkers: dict[str, type[Checker]] = {}
 
-    def register(self, cls):
-        # type: (Type[Checker]) -> None
+    def register(self, cls: type[Checker]) -> None:
         self._checkers[cls.name] = cls
 
-    def get_all(self, exclude=None):
-        # type: (Optional[List[str]]) -> List[Checker]
+    def get_all(self, exclude: Optional[list[str]] = None) -> list[Checker]:
         exclude_set = set(exclude) if exclude else set()
         return [cls() for name, cls in sorted(self._checkers.items()) if name not in exclude_set]
 
-    def get_by_names(self, names):
-        # type: (List[str]) -> List[Checker]
+    def get_by_names(self, names: list[str]) -> list[Checker]:
         result = []
         for name in names:
             if name not in self._checkers:
@@ -58,23 +56,20 @@ class CheckerRegistry:
             result.append(self._checkers[name]())
         return result
 
-    def all_names(self):
-        # type: () -> List[str]
+    def all_names(self) -> list[str]:
         return sorted(self._checkers.keys())
 
-    def get_all_patterns(self, checkers=None):
-        # type: (Optional[List[Checker]]) -> Set[str]
+    def get_all_patterns(self, checkers: Optional[list[Checker]] = None) -> set[str]:
         """Union of all patterns from given checkers (or all registered)."""
         if checkers is None:
             checkers = self.get_all()
-        patterns = set()  # type: Set[str]
+        patterns: set[str] = set()
         for checker in checkers:
             patterns.update(checker.patterns)
         return patterns
 
 
-def _matches_any_pattern(filename, patterns):
-    # type: (str, Set[str]) -> bool
+def _matches_any_pattern(filename: str, patterns: set[str]) -> bool:
     """Check if filename matches any of the patterns (exact or fnmatch glob)."""
     for pattern in patterns:
         if fnmatch.fnmatch(filename, pattern):
@@ -82,11 +77,10 @@ def _matches_any_pattern(filename, patterns):
     return False
 
 
-def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFAULT_MAX_INDEX_SIZE, extra_exclude_dirs=None):
-    # type: (str, Set[str], int, int, Optional[Set[str]]) -> FileIndex
+def build_index(root: str, patterns: set[str], max_depth: int = DEFAULT_MAX_DEPTH, max_index_size: int = DEFAULT_MAX_INDEX_SIZE, extra_exclude_dirs: Optional[set[str]] = None) -> FileIndex:
     """Single os.walk, filtered to only interesting files."""
     excluded = EXCLUDED_DIRS | extra_exclude_dirs if extra_exclude_dirs else EXCLUDED_DIRS
-    index = {}  # type: FileIndex
+    index: FileIndex = {}
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded dirs (modify in-place)
@@ -98,7 +92,7 @@ def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFA
             dirnames.clear()
             continue
         # Filter to interesting files
-        matched = set()  # type: Set[str]
+        matched: set[str] = set()
         for fname in sorted(filenames):
             if _matches_any_pattern(fname, patterns):
                 matched.add(fname)
@@ -117,10 +111,9 @@ def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFA
     return index
 
 
-def run_checkers(checkers, index, root):
-    # type: (List[Checker], FileIndex, str) -> List[Finding]
+def run_checkers(checkers: list[Checker], index: FileIndex, root: str) -> list[Finding]:
     """Run checkers against the index, return findings."""
-    findings = []  # type: List[Finding]
+    findings: list[Finding] = []
     for checker in checkers:
         try:
             results = checker.check(index, root)
@@ -138,11 +131,10 @@ def run_checkers(checkers, index, root):
     return findings
 
 
-def format_text(findings):
-    # type: (List[Finding]) -> str
+def format_text(findings: list[Finding]) -> str:
     """Format findings as plain text. No colors."""
-    lines = []  # type: List[str]
-    files = set()  # type: Set[str]
+    lines: list[str] = []
+    files: set[str] = set()
 
     for f in findings:
         files.add(f.path)

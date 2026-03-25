@@ -1,13 +1,12 @@
 """GitHub Actions checker: enforces SHA pinning on action refs."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Matches lines containing uses: <ref>
 _USES_RE = re.compile(r'^\s*-?\s*uses:\s*(\S+)')
@@ -19,8 +18,7 @@ _SHA_RE = re.compile(r'^[0-9a-f]{40}$')
 _WORKFLOW_PATH_PARTS = (".github", "workflows")
 
 
-def _is_workflow_path(rel_path):
-    # type: (str) -> bool
+def _is_workflow_path(rel_path: str) -> bool:
     """Return True if rel_path contains .github/workflows/ as consecutive path components."""
     parts = rel_path.replace("\\", "/").split("/")
     for i in range(len(parts) - 1):
@@ -32,11 +30,10 @@ def _is_workflow_path(rel_path):
 class GitHubActionsChecker(Checker):
     name = "github_actions"
     description = "Checks GitHub Actions workflow files for SHA-pinned action refs"
-    patterns = ["*.yml", "*.yaml"]  # type: List[str]
+    patterns: list[str] = ["*.yml", "*.yaml"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

@@ -1,13 +1,12 @@
 """Gradle checker: enforces pinned versions in build.gradle / build.gradle.kts files
 and requires a gradle.lockfile companion."""
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Dependency configurations to match (Groovy and Kotlin DSL)
 _CONFIGS = (
@@ -40,8 +39,7 @@ _DEP_RE = re.compile(
 _RANGE_RE = re.compile(r"[\[\]()]")
 
 
-def _is_bad_version(version):
-    # type: (str) -> str
+def _is_bad_version(version: str) -> str:
     """Return a human-readable reason string if version is bad, else empty string."""
     if not version:
         return "missing version"
@@ -60,8 +58,7 @@ def _is_bad_version(version):
     return ""
 
 
-def _parse_lockfile_coords(path):
-    # type: (str) -> Set[str]
+def _parse_lockfile_coords(path: str) -> set[str]:
     """Parse a gradle.lockfile and return a set of 'group:artifact' strings.
 
     Each non-comment, non-empty line has the form:
@@ -70,7 +67,7 @@ def _parse_lockfile_coords(path):
         empty=
     Lines starting with '#' and the 'empty=' sentinel are skipped.
     """
-    coords = set()  # type: Set[str]
+    coords: set[str] = set()
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -92,11 +89,10 @@ class GradleChecker(Checker):
         "Checks build.gradle/build.gradle.kts for unpinned dependency versions "
         "and requires a gradle.lockfile"
     )
-    patterns = ["build.gradle", "build.gradle.kts", "gradle.lockfile"]  # type: List[str]
+    patterns: list[str] = ["build.gradle", "build.gradle.kts", "gradle.lockfile"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]
@@ -105,7 +101,7 @@ class GradleChecker(Checker):
             has_build_gradle_kts = "build.gradle.kts" in files
             has_lockfile = "gradle.lockfile" in files
 
-            build_files = []  # type: List[str]
+            build_files: list[str] = []
             if has_build_gradle:
                 build_files.append("build.gradle")
             if has_build_gradle_kts:
@@ -128,13 +124,13 @@ class GradleChecker(Checker):
                 ))
 
             # Parse lockfile coords once (if present) for cross-referencing
-            lock_coords = set()  # type: Set[str]
+            lock_coords: set[str] = set()
             if has_lockfile:
                 lock_path = os.path.join(dir_path, "gradle.lockfile")
                 lock_coords = _parse_lockfile_coords(lock_path)
 
             # Check dependency versions in each build file
-            missing_from_lock = []  # type: List[str]
+            missing_from_lock: list[str] = []
             for fname in build_files:
                 full_path = os.path.join(dir_path, fname)
                 rel_path = os.path.relpath(full_path, root)

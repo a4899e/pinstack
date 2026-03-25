@@ -1,14 +1,19 @@
 """SARIF 2.1.0 output builder (stdlib json only)."""
 
+from __future__ import annotations
+
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pinstack.core import Finding
 
 import pinstack
 
 
-def format_sarif(findings):
-    # type: (List[Finding]) -> str
-    rules = {}  # type: dict
-    results = []  # type: list
+def format_sarif(findings: list[Finding]) -> str:
+    rules: dict = {}
+    results: list = []
 
     for f in findings:
         rule_id = f.checker

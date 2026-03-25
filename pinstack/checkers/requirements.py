@@ -1,13 +1,12 @@
 """Requirements checker: enforces == pinning and --hash= on requirements*.txt files."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Matches a package specifier line.
 # Group 1: package name (including optional [extras])
@@ -24,8 +23,7 @@ _SPECIFIER_RE = re.compile(
 )
 
 
-def _check_line(raw_line):
-    # type: (str) -> tuple
+def _check_line(raw_line: str) -> tuple:
     """
     Parse a single requirements line.
 
@@ -92,11 +90,10 @@ def _check_line(raw_line):
 class RequirementsChecker(Checker):
     name = "requirements"
     description = "Checks requirements*.txt files for == pinning and --hash= integrity markers"
-    patterns = ["requirements*.txt"]  # type: List[str]
+    patterns: list[str] = ["requirements*.txt"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
@@ -116,7 +113,7 @@ class RequirementsChecker(Checker):
                 # We need to handle continuation lines: a line ending with \ means the next
                 # line is a continuation (typically holds --hash= entries). We join logical lines
                 # so that hash detection works correctly.
-                logical_lines = []  # type: List[tuple]  # (logical_text, start_lineno)
+                logical_lines: list[tuple] = []  # (logical_text, start_lineno)
                 i = 0
                 while i < len(raw_lines):
                     lineno = i + 1  # 1-based

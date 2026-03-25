@@ -1,21 +1,19 @@
 """Dockerfile checker: enforces digest pinning on FROM image references."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Matches: FROM <image> [AS <name>]
 # Group 1: image reference
 _FROM_RE = re.compile(r'^FROM\s+(\S+)(?:\s+AS\s+\S+)?\s*$', re.IGNORECASE)
 
 
-def _is_build_stage_alias(image):
-    # type: (str) -> bool
+def _is_build_stage_alias(image: str) -> bool:
     """Return True if image looks like a bare stage alias (no :, @, ., /)."""
     return not any(c in image for c in (':', '@', '.', '/'))
 
@@ -23,11 +21,10 @@ def _is_build_stage_alias(image):
 class DockerfileChecker(Checker):
     name = "dockerfile"
     description = "Checks Dockerfile FROM instructions for digest (@sha256:) pinning"
-    patterns = ["Dockerfile*"]  # type: List[str]
+    patterns: list[str] = ["Dockerfile*"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

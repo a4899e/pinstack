@@ -1,18 +1,16 @@
 """Go checker: enforces go.sum exists alongside go.mod and checks h1: hashes."""
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
-def _parse_gomod_deps(path):
-    # type: (str) -> List[str]
+def _parse_gomod_deps(path: str) -> list[str]:
     """Return list of module names from require directives in go.mod."""
-    deps = []  # type: List[str]
+    deps: list[str] = []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
@@ -44,10 +42,9 @@ def _parse_gomod_deps(path):
     return deps
 
 
-def _parse_gosum_modules(path):
-    # type: (str) -> Set[str]
+def _parse_gosum_modules(path: str) -> set[str]:
     """Return set of module names present in go.sum (ignoring /go.mod suffix)."""
-    modules = set()  # type: Set[str]
+    modules: set[str] = set()
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
@@ -70,11 +67,10 @@ def _parse_gosum_modules(path):
 class GoChecker(Checker):
     name = "go"
     description = "Checks go.mod/go.sum pairs: go.sum must exist and contain h1: hashes"
-    patterns = ["go.mod", "go.sum"]  # type: List[str]
+    patterns: list[str] = ["go.mod", "go.sum"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]
@@ -129,7 +125,7 @@ class GoChecker(Checker):
             gomod_deps = _parse_gomod_deps(mod_path)
             gosum_modules = _parse_gosum_modules(sum_path)
 
-            missing = []  # type: List[str]
+            missing: list[str] = []
             for dep in gomod_deps:
                 if dep not in gosum_modules and (dep + "/go.mod") not in gosum_modules:
                     missing.append(dep)

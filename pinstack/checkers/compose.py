@@ -1,13 +1,12 @@
 """Docker Compose checker: enforces digest pinning on image references."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Matches lines like:   image: nginx:1.25
 _IMAGE_RE = re.compile(r'^\s*image:\s*(\S+)')
@@ -16,16 +15,15 @@ _IMAGE_RE = re.compile(r'^\s*image:\s*(\S+)')
 class ComposeChecker(Checker):
     name = "compose"
     description = "Checks docker-compose files for digest (@sha256:) pinning on image references"
-    patterns = [  # type: List[str]
+    patterns: list[str] = [
         "docker-compose*.yml",
         "docker-compose*.yaml",
         "compose*.yml",
         "compose*.yaml",
     ]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

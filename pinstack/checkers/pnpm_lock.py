@@ -1,15 +1,14 @@
 """pnpm-lock.yaml checker: warns when package entries are missing an integrity hash."""
 
+from __future__ import annotations
+
 import os
-from typing import Dict, Set
+from typing import Optional
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
-def _parse_pnpm_lock(lines):
-    # type: (List[str]) -> List[tuple]
+def _parse_pnpm_lock(lines: list[str]) -> list[tuple]:
     """
     Parse a pnpm-lock.yaml file and return a list of
     (package_key, start_lineno, has_integrity) tuples for each package entry.
@@ -18,10 +17,10 @@ def _parse_pnpm_lock(lines):
     indented line that ends with ":" as a package entry header.  Within
     each entry we look for a "resolution:" line that contains "integrity".
     """
-    blocks = []  # type: List[tuple]
+    blocks: list[tuple] = []
 
     in_packages_section = False
-    current_pkg = None   # type: Optional[str]
+    current_pkg: Optional[str] = None
     current_start = 0
     current_has_integrity = False
 
@@ -75,11 +74,10 @@ def _parse_pnpm_lock(lines):
 class PnpmLockChecker(Checker):
     name = "pnpm_lock"
     description = "Checks pnpm-lock.yaml files for package entries missing integrity hashes"
-    patterns = ["pnpm-lock.yaml"]  # type: List[str]
+    patterns: list[str] = ["pnpm-lock.yaml"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

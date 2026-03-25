@@ -1,12 +1,12 @@
 """Cargo checker: enforces checksum presence in Cargo.lock for registry packages."""
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Dict, Set
+from typing import Optional
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Sections in Cargo.toml that list dependencies
 _DEP_SECTION_NAMES = frozenset([
@@ -16,10 +16,9 @@ _DEP_SECTION_NAMES = frozenset([
 ])
 
 
-def _parse_cargo_toml_deps(path):
-    # type: (str) -> List[str]
+def _parse_cargo_toml_deps(path: str) -> list[str]:
     """Return list of dependency names from Cargo.toml."""
-    deps = []  # type: List[str]
+    deps: list[str] = []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
@@ -49,10 +48,9 @@ def _parse_cargo_toml_deps(path):
     return deps
 
 
-def _parse_cargo_lock_names(lines):
-    # type: (List[str]) -> Set[str]
+def _parse_cargo_lock_names(lines: list[str]) -> set[str]:
     """Return set of package names from already-read Cargo.lock lines."""
-    names = set()  # type: Set[str]
+    names: set[str] = set()
     for raw_line in lines:
         line = raw_line.strip()
         if line.startswith("name = "):
@@ -63,11 +61,10 @@ def _parse_cargo_lock_names(lines):
 class CargoChecker(Checker):
     name = "cargo"
     description = "Checks Cargo.lock for missing checksums on registry packages"
-    patterns = ["Cargo.lock", "Cargo.toml"]  # type: List[str]
+    patterns: list[str] = ["Cargo.lock", "Cargo.toml"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]
@@ -86,13 +83,12 @@ class CargoChecker(Checker):
 
             # Parse [[package]] blocks for checksum checks
             in_package = False
-            pkg_name = None        # type: Optional[str]
+            pkg_name: Optional[str] = None
             pkg_line = 0
             has_source = False
             has_checksum = False
 
-            def flush_package(findings_list, rp):
-                # type: (List[Finding], str) -> None
+            def flush_package(findings_list: list[Finding], rp: str) -> None:
                 if in_package and has_source and not has_checksum and pkg_name is not None:
                     findings_list.append(Finding(
                         checker="cargo",

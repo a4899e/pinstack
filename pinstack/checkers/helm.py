@@ -1,24 +1,23 @@
 """Helm checker: enforces Chart.lock existence when dependencies declared, and digest presence."""
 
+from __future__ import annotations
+
 import os
-from typing import Dict, Set
+from typing import Optional
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
 class HelmChecker(Checker):
     name = "helm"
     description = "Checks Chart.yaml for missing Chart.lock and Chart.lock for missing digests"
-    patterns = ["Chart.yaml", "Chart.lock"]  # type: List[str]
+    patterns: list[str] = ["Chart.yaml", "Chart.lock"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         # Collect all directories that have at least one helm file
-        helm_dirs = set()  # type: Set[str]
+        helm_dirs: set[str] = set()
         for dir_path in index.keys():
             for fname in index[dir_path]:
                 if fname in ("Chart.yaml", "Chart.lock"):
@@ -68,8 +67,7 @@ class HelmChecker(Checker):
 
         return findings
 
-    def _has_dependencies(self, path):
-        # type: (str) -> bool
+    def _has_dependencies(self, path: str) -> bool:
         """Return True if Chart.yaml contains a top-level 'dependencies:' line."""
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -81,14 +79,13 @@ class HelmChecker(Checker):
             pass
         return False
 
-    def _parse_dep_names(self, path):
-        # type: (str) -> Set[str]
+    def _parse_dep_names(self, path: str) -> set[str]:
         """Parse a Chart.yaml or Chart.lock and return the set of dependency names.
 
         Looks for lines of the form '- name: <value>' that appear after a
         'dependencies:' section header.
         """
-        names = set()  # type: Set[str]
+        names: set[str] = set()
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 in_deps = False
@@ -111,10 +108,9 @@ class HelmChecker(Checker):
             pass
         return names
 
-    def _check_lock_digests(self, path, rel_path):
-        # type: (str, str) -> List[Finding]
+    def _check_lock_digests(self, path: str, rel_path: str) -> list[Finding]:
         """Parse Chart.lock line-by-line; warn if any dependency block lacks a digest: field."""
-        findings = []  # type: List[Finding]
+        findings: list[Finding] = []
 
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -124,7 +120,7 @@ class HelmChecker(Checker):
 
         # Each dependency entry starts with "- name:" and ends when the next
         # "- name:" or end-of-dependencies section is reached.
-        dep_name = None   # type: str
+        dep_name: Optional[str] = None
         dep_line = 0
         has_digest = False
 

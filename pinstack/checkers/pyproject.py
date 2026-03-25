@@ -1,12 +1,11 @@
 """Pyproject checker: enforces == pinning in [project] dependencies and optional-dependencies."""
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Sections we care about
 _SECTION_PROJECT = "project"
@@ -33,8 +32,7 @@ _DEP_RE = re.compile(
 )
 
 
-def _extract_string_value(raw):
-    # type: (str) -> str
+def _extract_string_value(raw: str) -> str:
     """Strip surrounding quotes from a TOML string value."""
     s = raw.strip().strip(",").strip()
     if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
@@ -42,8 +40,7 @@ def _extract_string_value(raw):
     return s
 
 
-def _strip_inline_comment(line):
-    # type: (str) -> str
+def _strip_inline_comment(line: str) -> str:
     """Remove trailing inline comment from a TOML line (outside of strings)."""
     # Simple approach: find ' #' that is not inside a quoted string
     in_single = False
@@ -58,8 +55,7 @@ def _strip_inline_comment(line):
     return line
 
 
-def extract_dependency_arrays(content):
-    # type: (str) -> List[Tuple[List[str], str]]
+def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
     """
     Parse pyproject.toml content with a state machine and extract dependency arrays.
 
@@ -71,10 +67,10 @@ def extract_dependency_arrays(content):
     [project.optional-dependencies] (any key) are returned.
     Other arrays like classifiers, requires, etc. are ignored.
     """
-    results = []           # type: List[Tuple[List[str], str]]
+    results: list[tuple[list[str], str]] = []
     current_section = ""   # current TOML section name
     in_dep_array = False   # are we inside a target dependency array?
-    current_deps = []      # type: List[str]
+    current_deps: list[str] = []
     current_label = ""     # label for the current array
     array_depth = 0        # bracket nesting depth (to handle inline arrays properly)
 
@@ -155,7 +151,7 @@ def extract_dependency_arrays(content):
         if close_pos >= 0:
             # Entire array is on one line
             items_text = after_bracket[:close_pos]
-            deps = []  # type: List[str]
+            deps: list[str] = []
             for item in _parse_array_items_from_line(items_text):
                 val = _extract_string_value(item)
                 if val:
@@ -180,13 +176,12 @@ def extract_dependency_arrays(content):
     return results
 
 
-def _parse_array_items_from_line(text):
-    # type: (str) -> List[str]
+def _parse_array_items_from_line(text: str) -> list[str]:
     """
     Extract quoted string tokens from a TOML array line fragment.
     Returns a list of raw tokens (still quoted, may have trailing commas).
     """
-    tokens = []  # type: List[str]
+    tokens: list[str] = []
     i = 0
     while i < len(text):
         ch = text[i]
@@ -204,8 +199,7 @@ def _parse_array_items_from_line(text):
     return tokens
 
 
-def _check_dep_specifier(dep):
-    # type: (str) -> Tuple[bool, str]
+def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     """
     Check if a dependency specifier is exactly == pinned.
 
@@ -242,8 +236,7 @@ _LOCK_FILES = frozenset([
 ])
 
 
-def _normalize_python_name(name):
-    # type: (str) -> str
+def _normalize_python_name(name: str) -> str:
     """Normalize a Python package name per PEP 503: lowercase, replace - and . with _."""
     # Strip extras like [extra1,extra2]
     bracket = name.find("[")
@@ -252,8 +245,7 @@ def _normalize_python_name(name):
     return re.sub(r'[-._]+', '_', name.strip().lower())
 
 
-def _extract_name_from_dep(dep):
-    # type: (str) -> str
+def _extract_name_from_dep(dep: str) -> str:
     """Extract the package name from a PEP 508 dependency string."""
     m = _DEP_RE.match(dep.strip())
     if m:
@@ -266,11 +258,10 @@ def _extract_name_from_dep(dep):
     return dep
 
 
-def _extract_lock_file_names(full_path, lock_filename):
-    # type: (str, str) -> Set[str]
+def _extract_lock_file_names(full_path: str, lock_filename: str) -> set[str]:
     """Extract normalized package names from a Python lock file."""
     lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
-    names = set()  # type: Set[str]
+    names: set[str] = set()
     try:
         with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
             content = fh.read()
@@ -300,11 +291,10 @@ def _extract_lock_file_names(full_path, lock_filename):
 class PyprojectChecker(Checker):
     name = "pyproject"
     description = "Checks pyproject.toml [project] dependencies for == exact pinning"
-    patterns = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]  # type: List[str]
+    patterns: list[str] = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]
@@ -356,7 +346,7 @@ class PyprojectChecker(Checker):
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_lock_file_names(full_path, lock_filename)
                 if lock_names:
-                    missing = []  # type: List[str]
+                    missing: list[str] = []
                     for deps, label in dep_arrays:
                         for dep in deps:
                             raw_name = _extract_name_from_dep(dep)
@@ -378,8 +368,7 @@ class PyprojectChecker(Checker):
         return findings
 
 
-def _find_dep_line(raw_lines, dep):
-    # type: (List[str], str) -> int
+def _find_dep_line(raw_lines: list[str], dep: str) -> int:
     """
     Search raw_lines for the line containing this dependency string.
     Returns 1-based line number, or 0 if not found.

@@ -1,12 +1,11 @@
 """package.json checker: enforces exact version pinning in all dependency sections."""
 
+from __future__ import annotations
+
 import json
 import os
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Version prefixes that indicate a non-exact (unpinned) dependency.
 _UNPINNED_PREFIXES = ("^", "~", ">=", "<=", ">", "<")
@@ -25,8 +24,7 @@ _DEP_SECTIONS = (
 _LOCK_FILES = frozenset(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
 
 
-def _is_unpinned(version):
-    # type: (str) -> bool
+def _is_unpinned(version: str) -> bool:
     """Return True if the version string uses a range operator."""
     if not version or not isinstance(version, str):
         return False
@@ -40,11 +38,10 @@ def _is_unpinned(version):
     return False
 
 
-def _extract_js_lock_names(full_path, lock_filename):
-    # type: (str, str) -> Set[str]
+def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
     """Extract package names from a JS lock file."""
     lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
-    names = set()  # type: Set[str]
+    names: set[str] = set()
     try:
         with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
             content = fh.read()
@@ -111,11 +108,10 @@ def _extract_js_lock_names(full_path, lock_filename):
 class PackageJsonChecker(Checker):
     name = "package_json"
     description = "Checks package.json files for unpinned (non-exact) dependency versions"
-    patterns = ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"]  # type: List[str]
+    patterns: list[str] = ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]
@@ -167,7 +163,7 @@ class PackageJsonChecker(Checker):
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_js_lock_names(full_path, lock_filename)
                 if lock_names:
-                    missing = []  # type: List[str]
+                    missing: list[str] = []
                     for section in _DEP_SECTIONS:
                         deps = data.get(section)
                         if not deps or not isinstance(deps, dict):

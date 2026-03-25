@@ -1,22 +1,21 @@
 """Terraform checker: enforces h1: hashes in .terraform.lock.hcl provider blocks."""
 
+from __future__ import annotations
+
 import fnmatch
 import os
-from typing import Dict, Set
+from typing import Optional
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
 class TerraformChecker(Checker):
     name = "terraform"
     description = "Checks .terraform.lock.hcl for provider blocks missing h1: hashes"
-    patterns = [".terraform.lock.hcl"]  # type: List[str]
+    patterns: list[str] = [".terraform.lock.hcl"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
@@ -33,7 +32,7 @@ class TerraformChecker(Checker):
                     continue
 
                 in_provider = False
-                provider_name = None  # type: Optional[str]
+                provider_name: Optional[str] = None
                 provider_line = 0
                 in_hashes = False
                 has_h1 = False

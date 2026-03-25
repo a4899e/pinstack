@@ -1,22 +1,20 @@
 """package-lock.json checker: warns when packages are missing an integrity hash."""
 
+from __future__ import annotations
+
 import json
 import os
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
 class PackageLockChecker(Checker):
     name = "package_lock"
     description = "Checks package-lock.json files for packages missing integrity hashes"
-    patterns = ["package-lock.json"]  # type: List[str]
+    patterns: list[str] = ["package-lock.json"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

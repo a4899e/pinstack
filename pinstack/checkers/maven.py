@@ -1,25 +1,22 @@
 """Maven checker: enforces explicit, non-dynamic versions in pom.xml dependency declarations."""
 
+from __future__ import annotations
+
 import os
 import xml.etree.ElementTree as ET
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 # Maven POM namespace URI
 _NS = "http://maven.apache.org/POM/4.0.0"
 _NS_PREFIX = "{%s}" % _NS
 
 
-def _tag(local):
-    # type: (str) -> str
+def _tag(local: str) -> str:
     return _NS_PREFIX + local
 
 
-def _find_version_line(raw_lines, dep_index):
-    # type: (List[str], int) -> int
+def _find_version_line(raw_lines: list[str], dep_index: int) -> int:
     """Given the line index (0-based) of a <dependency> open tag, find the line
     containing <version> text. Returns 1-based line number, or 0 if not found."""
     for i in range(dep_index, min(dep_index + 20, len(raw_lines))):
@@ -28,8 +25,7 @@ def _find_version_line(raw_lines, dep_index):
     return 0
 
 
-def _find_dep_line(raw_lines, start_search):
-    # type: (List[str], int) -> int
+def _find_dep_line(raw_lines: list[str], start_search: int) -> int:
     """Find the 0-based line index of the next <dependency> open tag at or after start_search."""
     for i in range(start_search, len(raw_lines)):
         stripped = raw_lines[i].strip()
@@ -41,11 +37,10 @@ def _find_dep_line(raw_lines, start_search):
 class MavenChecker(Checker):
     name = "maven"
     description = "Checks pom.xml for unpinned, dynamic, or SNAPSHOT dependency versions"
-    patterns = ["pom.xml"]  # type: List[str]
+    patterns: list[str] = ["pom.xml"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):

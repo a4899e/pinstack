@@ -1,18 +1,16 @@
 """Gemfile checker: warns when Gemfile exists but Gemfile.lock does not."""
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Dict, Set
 
-from pinstack.core import Checker, Finding
-
-FileIndex = Dict[str, Set[str]]
+from pinstack.core import Checker, Finding, FileIndex
 
 
-def _parse_gemfile_deps(path):
-    # type: (str) -> List[str]
+def _parse_gemfile_deps(path: str) -> list[str]:
     """Return list of gem names from Gemfile gem(...) declarations."""
-    deps = []  # type: List[str]
+    deps: list[str] = []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
@@ -31,10 +29,9 @@ def _parse_gemfile_deps(path):
     return deps
 
 
-def _parse_gemfile_lock_specs(path):
-    # type: (str) -> Set[str]
+def _parse_gemfile_lock_specs(path: str) -> set[str]:
     """Return set of gem names from the specs: section of Gemfile.lock."""
-    names = set()  # type: Set[str]
+    names: set[str] = set()
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
@@ -67,11 +64,10 @@ def _parse_gemfile_lock_specs(path):
 class GemfileChecker(Checker):
     name = "gemfile"
     description = "Checks that every Gemfile has a corresponding Gemfile.lock"
-    patterns = ["Gemfile", "Gemfile.lock"]  # type: List[str]
+    patterns: list[str] = ["Gemfile", "Gemfile.lock"]
 
-    def check(self, index, root):
-        # type: (FileIndex, str) -> List[Finding]
-        findings = []  # type: List[Finding]
+    def check(self, index: FileIndex, root: str) -> list[Finding]:
+        findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             files = index[dir_path]

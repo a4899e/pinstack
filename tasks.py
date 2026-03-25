@@ -19,5 +19,6 @@ def test(c):
 
 @task(pre=[test])
 def build(c):
-    """Lint and run tests."""
+    """Lint, type-check, and run tests."""
     c.run("ruff check .")
+    c.run("pyright")
