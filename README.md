@@ -143,6 +143,10 @@ tools that support the standard.
 
 ## CI Integration
 
+pinstack is a standalone CLI tool, not a library. It works with any project
+regardless of language. Python 3.8+ is the only requirement, and it ships on
+virtually every CI runner out of the box.
+
 ### GitHub Actions
 
 ```yaml
@@ -167,8 +171,106 @@ jobs:
         run: pinstack .
 ```
 
-Because pinstack has no dependencies, you can also install it once and cache it,
-or vendor it directly into your repository.
+To upload results to GitHub Code Scanning:
+
+```yaml
+      - name: Check dependency pinning (SARIF)
+        run: pinstack . --format sarif > pinstack.sarif
+        continue-on-error: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d
+        with:
+          sarif_file: pinstack.sarif
+```
+
+### GitLab CI
+
+```yaml
+pinstack:
+  stage: test
+  image: python:3-slim
+  before_script:
+    - pip install pinstack
+  script:
+    - pinstack .
+```
+
+To integrate with GitLab SAST, output SARIF and use the
+[SAST report artifact](https://docs.gitlab.com/ee/ci/yaml/artifacts_reports.html):
+
+```yaml
+pinstack:
+  stage: test
+  image: python:3-slim
+  before_script:
+    - pip install pinstack
+  script:
+    - pinstack . --format sarif > gl-sast-report.json || true
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+```
+
+### Python Projects (Invoke)
+
+Add a task to your `tasks.py`:
+
+```python
+from invoke import task
+
+@task
+def supply_chain(c):
+    """Check dependency pinning."""
+    c.run("pinstack .")
+```
+
+Then run it with `invoke supply-chain` or include it in your build task:
+
+```python
+@task(pre=[lint, typecheck, test, supply_chain])
+def build(c):
+    """Full build pipeline."""
+    pass
+```
+
+### Any Project
+
+pinstack runs anywhere Python 3.8+ is available. No virtual environment needed,
+no dependencies to install beyond pinstack itself.
+
+**With pip:**
+
+```
+pip install pinstack
+pinstack .
+```
+
+**Without pip (clone and run directly):**
+
+```
+git clone https://github.com/smthmlk/pinstack.git /tmp/pinstack
+python3 /tmp/pinstack/pinstack .
+```
+
+**Check only specific ecosystems:**
+
+```
+# Java project -- only check Maven and Gradle
+pinstack . --check maven,gradle
+
+# Node project -- only check JS ecosystem
+pinstack . --check package_json,package_lock,yarn_lock,pnpm_lock
+
+# Docker-only check
+pinstack . --check dockerfile,compose
+```
+
+**Skip directories that contain third-party code:**
+
+```
+pinstack . --exclude-dir vendor,third_party,checkouts
+```
 
 ---
 
