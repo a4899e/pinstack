@@ -60,6 +60,32 @@ def _is_bad_version(version):
     return ""
 
 
+def _parse_lockfile_coords(path):
+    # type: (str) -> Set[str]
+    """Parse a gradle.lockfile and return a set of 'group:artifact' strings.
+
+    Each non-comment, non-empty line has the form:
+        group:artifact:version=configurations
+    or the sentinel:
+        empty=
+    Lines starting with '#' and the 'empty=' sentinel are skipped.
+    """
+    coords = set()  # type: Set[str]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or line == "empty=":
+                    continue
+                # Format: group:artifact:version=configs
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    coords.add("{}:{}".format(parts[0], parts[1]))
+    except OSError:
+        pass
+    return coords
+
+
 class GradleChecker(Checker):
     name = "gradle"
     description = (
@@ -101,6 +127,12 @@ class GradleChecker(Checker):
                     message="{} has no gradle.lockfile; run 'gradle dependencies --write-locks'".format(first_build),
                 ))
 
+            # Parse lockfile coords once (if present) for cross-referencing
+            lock_coords = set()  # type: Set[str]
+            if has_lockfile:
+                lock_path = os.path.join(dir_path, "gradle.lockfile")
+                lock_coords = _parse_lockfile_coords(lock_path)
+
             # Check dependency versions in each build file
             for fname in build_files:
                 full_path = os.path.join(dir_path, fname)
@@ -139,6 +171,16 @@ class GradleChecker(Checker):
                             path=rel_path,
                             line=lineno,
                             message="'{}' uses {}; pin to an exact version".format(coord, reason),
+                        ))
+                        continue
+
+                    # Version is pinned and valid: cross-reference against lockfile
+                    if has_lockfile and coord not in lock_coords:
+                        findings.append(Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=lineno,
+                            message="dependency '{}' in {} not found in gradle.lockfile".format(coord, fname),
                         ))
 
         return findings

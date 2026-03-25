@@ -170,6 +170,102 @@ class TestGradleWithLockfile:
         )
 
 
+class TestGradleCrossRef:
+    """Cross-reference: build.gradle pinned deps must all appear in gradle.lockfile."""
+
+    def _make_index(self, build_gradle_name, build_gradle_content, lockfile_content=None):
+        # type: (str, str, str) -> list
+        import tempfile
+        d = tempfile.mkdtemp()
+        build_file = os.path.join(d, build_gradle_name)
+        with open(build_file, "w") as fh:
+            fh.write(build_gradle_content)
+        files = {build_gradle_name}
+        if lockfile_content is not None:
+            lockfile = os.path.join(d, "gradle.lockfile")
+            with open(lockfile, "w") as fh:
+                fh.write(lockfile_content)
+            files.add("gradle.lockfile")
+        index = {d: files}
+        return GradleChecker().check(index, d)
+
+    def test_dep_in_build_gradle_missing_from_lockfile(self):
+        build_gradle = (
+            "dependencies {\n"
+            "    implementation 'com.google.guava:guava:31.1-jre'\n"
+            "}\n"
+        )
+        lockfile = (
+            "# Gradle lock file\n"
+            "org.slf4j:slf4j-api:2.0.9=compileClasspath,runtimeClasspath\n"
+            "empty=\n"
+        )
+        findings = self._make_index("build.gradle", build_gradle, lockfile)
+        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        assert len(cross_ref) == 1, "Expected 1 cross-ref finding, got: {}".format(
+            [f.message for f in findings]
+        )
+        assert "com.google.guava:guava" in cross_ref[0].message
+        assert cross_ref[0].checker == "gradle"
+
+    def test_dep_in_build_gradle_present_in_lockfile(self):
+        build_gradle = (
+            "dependencies {\n"
+            "    implementation 'com.google.guava:guava:31.1-jre'\n"
+            "}\n"
+        )
+        lockfile = (
+            "# Gradle lock file\n"
+            "com.google.guava:guava:31.1-jre=compileClasspath,runtimeClasspath\n"
+            "empty=\n"
+        )
+        findings = self._make_index("build.gradle", build_gradle, lockfile)
+        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        assert cross_ref == [], "Dep present in lockfile — expected no cross-ref findings, got: {}".format(
+            [f.message for f in findings]
+        )
+
+    def test_kotlin_dsl_cross_ref(self):
+        build_gradle_kts = (
+            "dependencies {\n"
+            "    implementation(\"com.google.guava:guava:31.1-jre\")\n"
+            "}\n"
+        )
+        lockfile = (
+            "# Gradle lock file\n"
+            "org.slf4j:slf4j-api:2.0.9=compileClasspath,runtimeClasspath\n"
+            "empty=\n"
+        )
+        findings = self._make_index("build.gradle.kts", build_gradle_kts, lockfile)
+        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        assert len(cross_ref) == 1, "Expected 1 cross-ref finding for Kotlin DSL, got: {}".format(
+            [f.message for f in findings]
+        )
+        assert "com.google.guava:guava" in cross_ref[0].message
+
+    def test_multiple_deps_some_missing(self):
+        build_gradle = (
+            "dependencies {\n"
+            "    implementation 'com.google.guava:guava:31.1-jre'\n"
+            "    implementation 'org.slf4j:slf4j-api:2.0.9'\n"
+            "    implementation 'org.apache.commons:commons-lang3:3.12.0'\n"
+            "}\n"
+        )
+        lockfile = (
+            "# Gradle lock file\n"
+            "com.google.guava:guava:31.1-jre=compileClasspath,runtimeClasspath\n"
+            "empty=\n"
+        )
+        findings = self._make_index("build.gradle", build_gradle, lockfile)
+        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        assert len(cross_ref) == 2, "Expected 2 cross-ref findings, got: {}".format(
+            [f.message for f in findings]
+        )
+        missing_coords = {f.message for f in cross_ref}
+        assert any("org.slf4j:slf4j-api" in m for m in missing_coords)
+        assert any("org.apache.commons:commons-lang3" in m for m in missing_coords)
+
+
 class TestGradleNoGradle:
     def test_empty_index_no_findings(self):
         assert _check_empty() == []

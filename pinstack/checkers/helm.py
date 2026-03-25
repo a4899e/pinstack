@@ -44,12 +44,25 @@ class HelmChecker(Checker):
                         message="Chart.yaml declares dependencies but Chart.lock is missing; run 'helm dependency update'",
                     ))
 
-            # Check Chart.lock for missing digests
+            # Check Chart.lock for missing digests and cross-reference deps
             if has_chart_lock:
                 chart_lock_path = os.path.join(dir_path, "Chart.lock")
                 chart_lock_rel = os.path.relpath(chart_lock_path, root)
                 lock_findings = self._check_lock_digests(chart_lock_path, chart_lock_rel)
                 findings.extend(lock_findings)
+
+                # Cross-reference: every dep in Chart.yaml must appear in Chart.lock
+                if has_chart_yaml:
+                    yaml_deps = self._parse_dep_names(chart_yaml_path)
+                    lock_deps = self._parse_dep_names(chart_lock_path)
+                    for dep in sorted(yaml_deps):
+                        if dep not in lock_deps:
+                            findings.append(Finding(
+                                checker="helm",
+                                path=chart_yaml_rel,
+                                line=0,
+                                message="dependency '{}' in Chart.yaml not found in Chart.lock".format(dep),
+                            ))
 
         return findings
 
@@ -65,6 +78,36 @@ class HelmChecker(Checker):
         except OSError:
             pass
         return False
+
+    def _parse_dep_names(self, path):
+        # type: (str) -> Set[str]
+        """Parse a Chart.yaml or Chart.lock and return the set of dependency names.
+
+        Looks for lines of the form '- name: <value>' that appear after a
+        'dependencies:' section header.
+        """
+        names = set()  # type: Set[str]
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                in_deps = False
+                for line in fh:
+                    stripped = line.rstrip()
+                    bare = stripped.lstrip()
+                    if bare == "dependencies:" or bare.startswith("dependencies:"):
+                        in_deps = True
+                        continue
+                    if in_deps:
+                        # A top-level non-indented, non-list key ends the section
+                        if stripped and not stripped[0].isspace() and not stripped.startswith("-"):
+                            in_deps = False
+                            continue
+                        if bare.startswith("- name:"):
+                            name = bare[len("- name:"):].strip()
+                            if name:
+                                names.add(name)
+        except OSError:
+            pass
+        return names
 
     def _check_lock_digests(self, path, rel_path):
         # type: (str, str) -> List[Finding]

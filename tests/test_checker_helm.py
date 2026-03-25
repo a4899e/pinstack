@@ -85,3 +85,98 @@ class TestHelmBadDigest:
 
     def test_path_is_relative(self):
         assert not os.path.isabs(self.findings[0].path)
+
+
+class TestHelmCrossRef:
+    """Cross-reference: Chart.yaml deps must all appear in Chart.lock."""
+
+    def _make_index(self, chart_yaml_content, chart_lock_content=None):
+        # type: (str, str) -> list
+        import tempfile
+        d = tempfile.mkdtemp()
+        chart_yaml = os.path.join(d, "Chart.yaml")
+        with open(chart_yaml, "w") as fh:
+            fh.write(chart_yaml_content)
+        files = {"Chart.yaml"}
+        if chart_lock_content is not None:
+            chart_lock = os.path.join(d, "Chart.lock")
+            with open(chart_lock, "w") as fh:
+                fh.write(chart_lock_content)
+            files.add("Chart.lock")
+        index = {d: files}
+        return HelmChecker().check(index, d)
+
+    def test_dep_in_chart_yaml_missing_from_lock(self):
+        chart_yaml = (
+            "apiVersion: v2\n"
+            "name: my-app\n"
+            "dependencies:\n"
+            "  - name: nginx\n"
+            "    version: \"15.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+        )
+        chart_lock = (
+            "dependencies:\n"
+            "- name: redis\n"
+            "  version: \"17.0.0\"\n"
+            "  repository: https://charts.bitnami.com/bitnami\n"
+            "  digest: sha256:abc123\n"
+            "generated: \"2024-01-01T00:00:00Z\"\n"
+        )
+        findings = self._make_index(chart_yaml, chart_lock)
+        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        assert len(cross_ref) == 1, "Expected 1 cross-ref finding, got: {}".format(
+            [f.message for f in findings]
+        )
+        assert "nginx" in cross_ref[0].message
+        assert cross_ref[0].checker == "helm"
+
+    def test_dep_in_chart_yaml_present_in_lock(self):
+        chart_yaml = (
+            "apiVersion: v2\n"
+            "name: my-app\n"
+            "dependencies:\n"
+            "  - name: nginx\n"
+            "    version: \"15.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+        )
+        chart_lock = (
+            "dependencies:\n"
+            "- name: nginx\n"
+            "  version: \"15.0.0\"\n"
+            "  repository: https://charts.bitnami.com/bitnami\n"
+            "  digest: sha256:abc123\n"
+            "generated: \"2024-01-01T00:00:00Z\"\n"
+        )
+        findings = self._make_index(chart_yaml, chart_lock)
+        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        assert cross_ref == [], "All deps present in lock — expected no cross-ref findings, got: {}".format(
+            [f.message for f in findings]
+        )
+
+    def test_multiple_deps_one_missing(self):
+        chart_yaml = (
+            "apiVersion: v2\n"
+            "name: my-app\n"
+            "dependencies:\n"
+            "  - name: nginx\n"
+            "    version: \"15.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+            "  - name: redis\n"
+            "    version: \"17.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+        )
+        chart_lock = (
+            "dependencies:\n"
+            "- name: nginx\n"
+            "  version: \"15.0.0\"\n"
+            "  repository: https://charts.bitnami.com/bitnami\n"
+            "  digest: sha256:abc123\n"
+            "generated: \"2024-01-01T00:00:00Z\"\n"
+        )
+        findings = self._make_index(chart_yaml, chart_lock)
+        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        assert len(cross_ref) == 1, "Expected 1 cross-ref finding for missing redis, got: {}".format(
+            [f.message for f in findings]
+        )
+        assert "redis" in cross_ref[0].message
