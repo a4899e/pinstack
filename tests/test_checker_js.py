@@ -1,6 +1,9 @@
 """Tests for the four JS ecosystem checkers: package_json, package_lock, yarn_lock, pnpm_lock."""
 
+import json
 import os
+import shutil
+import tempfile
 
 from pinstack.core import Severity
 from pinstack.checkers.package_json import PackageJsonChecker
@@ -11,12 +14,15 @@ from pinstack.checkers.pnpm_lock import PnpmLockChecker
 JS_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "js")
 
 
-def _check_fixture_dir(checker, subpath):
-    # type: (object, str) -> list
+def _check_fixture_dir(checker, subpath, extra_files=None):
+    # type: (object, str, set) -> list
     """Run a checker against a single fixture directory, rooted at that directory."""
     dirpath = os.path.join(JS_FIXTURES, subpath)
     fname = checker.patterns[0]
-    index = {dirpath: {fname}}
+    files = {fname}
+    if extra_files:
+        files = files | extra_files
+    index = {dirpath: files}
     return checker.check(index, dirpath)
 
 
@@ -31,7 +37,8 @@ def _check_empty(checker):
 
 class TestPackageJsonGood:
     def test_exact_versions_no_findings(self):
-        findings = _check_fixture_dir(PackageJsonChecker(), "package_json/good")
+        findings = _check_fixture_dir(PackageJsonChecker(), "package_json/good",
+                                      extra_files={"package-lock.json"})
         assert findings == [], "Exact versions should produce 0 findings"
 
     def test_no_dependencies_no_findings(self):
@@ -63,7 +70,8 @@ class TestPackageJsonBad:
         self.findings = _check_fixture_dir(PackageJsonChecker(), "package_json/bad")
 
     def test_has_four_findings(self):
-        assert len(self.findings) == 4, "Expected 4 findings, got {}: {}".format(
+        # 4 pinning errors + 1 lock-file companion warning = 5 total
+        assert len(self.findings) == 5, "Expected 5 findings, got {}: {}".format(
             len(self.findings), [f.message for f in self.findings]
         )
 
@@ -84,7 +92,10 @@ class TestPackageJsonBad:
         assert any("react" in m for m in msgs), "react ^18.0.0 should be flagged"
 
     def test_all_findings_are_errors(self):
-        for f in self.findings:
+        # The lock-file companion warning is also expected; only check pinning findings
+        error_findings = [f for f in self.findings if f.severity == Severity.ERROR]
+        assert len(error_findings) == 4
+        for f in error_findings:
             assert f.severity == Severity.ERROR
 
     def test_findings_line_zero(self):
@@ -218,3 +229,100 @@ class TestPnpmLockBad:
 
     def test_finding_has_line_number(self):
         assert self.findings[0].line > 0
+
+
+# ---------------------------------------------------------------------------
+# package.json lock file companion check tests
+# ---------------------------------------------------------------------------
+
+_PACKAGE_JSON_WITH_DEPS = json.dumps({
+    "name": "my-app",
+    "version": "1.0.0",
+    "dependencies": {"express": "4.18.2"},
+})
+
+_PACKAGE_JSON_NO_DEPS = json.dumps({
+    "name": "my-app",
+    "version": "1.0.0",
+})
+
+
+def _make_package_json(tmpdir, content):
+    # type: (str, str) -> None
+    path = os.path.join(tmpdir, "package.json")
+    with open(path, "w") as fh:
+        fh.write(content)
+
+
+class TestPackageJsonLockFileCheck:
+    def test_no_lock_file_warns(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_warnings) == 1
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_package_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "package-lock.json"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_yarn_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "yarn.lock"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_pnpm_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "pnpm-lock.yaml"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_deps_no_warning(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_NO_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json"}}
+            findings = checker.check(index, tmpdir)
+            assert findings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_lock_file_warning_is_warning_severity(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_warnings) == 1
+            assert lock_warnings[0].severity == Severity.WARNING
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

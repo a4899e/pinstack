@@ -19,7 +19,9 @@ def _check_subdir(subdir_name):
     """Run PyprojectChecker against the pyproject.toml in a named fixture subdir."""
     checker = PyprojectChecker()
     dirpath = os.path.join(FIXTURES, subdir_name)
-    index = {dirpath: {"pyproject.toml"}}
+    # Include a lock file in the index so tests focused on pinning checks don't
+    # also pick up the companion-lock-file warning.
+    index = {dirpath: {"pyproject.toml", "poetry.lock"}}
     return checker.check(index, dirpath)
 
 
@@ -290,9 +292,125 @@ class TestPyprojectCheckerOptionalDeps:
                     ']\n'
                 )
             checker = PyprojectChecker()
-            index = {tmpdir: {"pyproject.toml"}}
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             assert len(findings) == 1
             assert "pytest" in findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Lock file companion check tests
+# ---------------------------------------------------------------------------
+
+_PYPROJECT_WITH_DEPS = (
+    '[project]\n'
+    'name = "myapp"\n'
+    'version = "1.0.0"\n'
+    'dependencies = [\n'
+    '    "flask==2.3.2",\n'
+    ']\n'
+)
+
+_PYPROJECT_NO_DEPS = (
+    '[project]\n'
+    'name = "myapp"\n'
+    'version = "1.0.0"\n'
+)
+
+
+def _make_pyproject(tmpdir, content):
+    # type: (str, str) -> None
+    path = os.path.join(tmpdir, "pyproject.toml")
+    with open(path, "w") as fh:
+        fh.write(content)
+
+
+class TestPyprojectLockFileCheck:
+    def test_no_lock_file_warns(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [
+                f for f in findings
+                if "lock file" in f.message
+            ]
+            assert len(lock_warnings) == 1
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_requirements_txt_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_pdm_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "pdm.lock"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_uv_lock_satisfies(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "uv.lock"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_deps_no_warning(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_NO_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml"}}
+            findings = checker.check(index, tmpdir)
+            assert findings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_lock_file_warning_is_warning_severity(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_warnings) == 1
+            assert lock_warnings[0].severity == Severity.WARNING
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
