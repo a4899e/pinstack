@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <style>
+      .pin-text { font-family: 'Courier New', monospace; font-size: 11px; fill: #e0e0e0; }
+      .pin-head { fill: none; stroke-width: 1.5; }
+      .title { font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 36px; fill: #f0f0f0; letter-spacing: 2px; }
+      .subtitle { font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 300; font-size: 13px; fill: #888888; letter-spacing: 1px; }
+    </style>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+    <linearGradient id="pin1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+    <linearGradient id="pin2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f3460"/>
+      <stop offset="100%" stop-color="#4a90d9"/>
+    </linearGradient>
+    <linearGradient id="pin3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+    <linearGradient id="pin4" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f3460"/>
+      <stop offset="100%" stop-color="#4a90d9"/>
+    </linearGradient>
+    <linearGradient id="pin5" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+    <linearGradient id="pin6" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f3460"/>
+      <stop offset="100%" stop-color="#4a90d9"/>
+    </linearGradient>
+    <linearGradient id="pin7" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e94560"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="400" rx="12" fill="url(#bg)"/>
+
+  <!-- Pin stack: each "pin" is a rounded rect with a sha256 hash inside -->
+  <!-- Stacked with slight offset to look like a pile -->
+
+  <!-- Pin 7 (bottom) -->
+  <g transform="translate(72, 258) rotate(-1.5)">
+    <rect width="460" height="22" rx="11" fill="url(#pin7)" opacity="0.35"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.5">a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890</text>
+  </g>
+
+  <!-- Pin 6 -->
+  <g transform="translate(68, 232) rotate(0.8)">
+    <rect width="460" height="22" rx="11" fill="url(#pin6)" opacity="0.45"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.6">9f8e7d6c5b4a39289f8e7d6c5b4a39289f8e7d6c5b4a39289f8e7d6c5b4a3928</text>
+  </g>
+
+  <!-- Pin 5 -->
+  <g transform="translate(74, 206) rotate(-0.5)">
+    <rect width="460" height="22" rx="11" fill="url(#pin5)" opacity="0.55"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.7">e3d2c1b0a9f8e7d6e3d2c1b0a9f8e7d6e3d2c1b0a9f8e7d6e3d2c1b0a9f8e7d6</text>
+  </g>
+
+  <!-- Pin 4 -->
+  <g transform="translate(66, 180) rotate(1.2)">
+    <rect width="460" height="22" rx="11" fill="url(#pin4)" opacity="0.65"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.8">5a6b7c8d9e0f1a2b5a6b7c8d9e0f1a2b5a6b7c8d9e0f1a2b5a6b7c8d9e0f1a2b</text>
+  </g>
+
+  <!-- Pin 3 -->
+  <g transform="translate(70, 154) rotate(-0.8)">
+    <rect width="460" height="22" rx="11" fill="url(#pin3)" opacity="0.75"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.85">b4c5d6e7f8091a2bb4c5d6e7f8091a2bb4c5d6e7f8091a2bb4c5d6e7f8091a2b</text>
+  </g>
+
+  <!-- Pin 2 -->
+  <g transform="translate(68, 128) rotate(0.4)">
+    <rect width="460" height="22" rx="11" fill="url(#pin2)" opacity="0.85"/>
+    <text x="14" y="15.5" class="pin-text" opacity="0.9">7f8091a2b3c4d5e67f8091a2b3c4d5e67f8091a2b3c4d5e67f8091a2b3c4d5e6</text>
+  </g>
+
+  <!-- Pin 1 (top, brightest) -->
+  <g transform="translate(70, 102) rotate(-0.3)">
+    <rect width="460" height="22" rx="11" fill="url(#pin1)" opacity="0.95"/>
+    <text x="14" y="15.5" class="pin-text">sha256:d8fd0e2dd667978b3503a47ebb7247e038179c1b2e77ef26008df6d2aabb755b</text>
+  </g>
+
+  <!-- Pointy pin heads on the left side -->
+  <circle cx="78" cy="113" r="4" class="pin-head" stroke="url(#pin1)" opacity="0.95"/>
+  <circle cx="76" cy="139" r="4" class="pin-head" stroke="url(#pin2)" opacity="0.85"/>
+  <circle cx="78" cy="165" r="4" class="pin-head" stroke="url(#pin3)" opacity="0.75"/>
+  <circle cx="74" cy="191" r="4" class="pin-head" stroke="url(#pin4)" opacity="0.65"/>
+  <circle cx="82" cy="217" r="4" class="pin-head" stroke="url(#pin5)" opacity="0.55"/>
+  <circle cx="76" cy="243" r="4" class="pin-head" stroke="url(#pin6)" opacity="0.45"/>
+  <circle cx="80" cy="269" r="4" class="pin-head" stroke="url(#pin7)" opacity="0.35"/>
+
+  <!-- Title -->
+  <text x="300" y="55" text-anchor="middle" class="title">PINSTACK</text>
+
+  <!-- Subtitle -->
+  <text x="300" y="340" text-anchor="middle" class="subtitle">SUPPLY-CHAIN DEPENDENCY PINNING ENFORCEMENT</text>
+
+  <!-- Tiny lock icon next to title -->
+  <g transform="translate(420, 36)">
+    <rect x="2" y="6" width="12" height="10" rx="2" fill="none" stroke="#e94560" stroke-width="1.5"/>
+    <path d="M4,6 V3 a4,4 0 0,1 8,0 V6" fill="none" stroke="#e94560" stroke-width="1.5"/>
+    <circle cx="8" cy="11" r="1.5" fill="#e94560"/>
+  </g>
+</svg>
