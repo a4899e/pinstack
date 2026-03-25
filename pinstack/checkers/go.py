@@ -3,7 +3,7 @@
 import os
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -32,7 +32,6 @@ class GoChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.ERROR,
                     message="go.mod has no corresponding go.sum; run 'go mod tidy'",
                 ))
                 continue
@@ -63,7 +62,6 @@ class GoChecker(Checker):
                         checker=self.name,
                         path=rel_sum,
                         line=lineno,
-                        severity=Severity.WARNING,
                         message="go.sum entry '{}' is missing h1: hash".format(parts[0]),
                     ))
 

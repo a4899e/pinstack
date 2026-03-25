@@ -3,7 +3,7 @@
 import os
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -28,7 +28,6 @@ class GemfileChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.WARNING,
                     message="Gemfile has no corresponding Gemfile.lock; run 'bundle install'",
                 ))
 

@@ -103,7 +103,6 @@ pinstack [PATH] [OPTIONS]
 | `--check NAME,NAME` | Only run these checkers (comma-separated). Mutually exclusive with `--exclude`. |
 | `--exclude NAME,NAME` | Skip these checkers (comma-separated). Mutually exclusive with `--check`. |
 | `--format FORMAT` | Output format: `text` (default) or `sarif`. |
-| `--severity LEVEL` | Minimum severity to report: `warning` (default, shows all) or `error`. |
 | `--exit-zero` | Always exit 0, even when findings are present. Useful for advisory-only runs. |
 | `--max-depth N` | Maximum directory depth to recurse into. Default: 4. |
 | `--max-files N` | Maximum number of files to index. Default: 384. |
@@ -130,9 +129,9 @@ Human-readable output suitable for local development and CI logs:
 ```
 FAIL  Dockerfile:3  FROM without @sha256: digest: python:3.11-slim
 FAIL  requirements.txt:7  not pinned with ==: requests>=2.28
-WARN  go.mod:0  go.sum missing alongside go.mod
+FAIL  go.mod  go.sum missing alongside go.mod
 
-2 errors, 1 warning in 3 files
+3 errors in 3 files
 ```
 
 ### sarif

@@ -5,7 +5,7 @@ import json
 import pytest
 
 import pinstack
-from pinstack.core import Finding, Severity
+from pinstack.core import Finding
 from pinstack.sarif import format_sarif
 
 
@@ -14,13 +14,12 @@ from pinstack.sarif import format_sarif
 # ---------------------------------------------------------------------------
 
 def _finding(checker="requirements", path="req.txt", line=1,
-             severity=Severity.ERROR, message="missing pin"):
+             message="missing pin"):
     # type: (...) -> Finding
     return Finding(
         checker=checker,
         path=path,
         line=line,
-        severity=severity,
         message=message,
     )
 
@@ -53,7 +52,7 @@ class TestSingleFinding:
         assert result["ruleId"] == "requirements"
 
     def test_level_error(self):
-        data = _parse([_finding(severity=Severity.ERROR)])
+        data = _parse([_finding()])
         result = data["runs"][0]["results"][0]
         assert result["level"] == "error"
 
@@ -119,20 +118,9 @@ class TestMultipleFindingsSameChecker:
 
 class TestErrorLevel:
     def test_error_level(self):
-        data = _parse([_finding(severity=Severity.ERROR)])
+        data = _parse([_finding()])
         result = data["runs"][0]["results"][0]
         assert result["level"] == "error"
-
-
-# ---------------------------------------------------------------------------
-# test_warning_level
-# ---------------------------------------------------------------------------
-
-class TestWarningLevel:
-    def test_warning_level(self):
-        data = _parse([_finding(severity=Severity.WARNING)])
-        result = data["runs"][0]["results"][0]
-        assert result["level"] == "warning"
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +197,9 @@ class TestValidJson:
 
     def test_mixed_findings_is_valid_json(self):
         findings = [
-            _finding(checker="requirements", severity=Severity.ERROR, line=1),
-            _finding(checker="dockerfile", severity=Severity.WARNING, line=3),
-            _finding(checker="requirements", severity=Severity.WARNING, line=9),
+            _finding(checker="requirements", line=1),
+            _finding(checker="dockerfile", line=3),
+            _finding(checker="requirements", line=9),
         ]
         output = format_sarif(findings)
         json.loads(output)  # must not raise

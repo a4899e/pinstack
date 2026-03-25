@@ -1,4 +1,4 @@
-"""Tests for pinstack.core — FileIndex, Finding, Severity, Checker, CheckerRegistry, runner, formatter."""
+"""Tests for pinstack.core — FileIndex, Finding, Checker, CheckerRegistry, runner, formatter."""
 
 import os
 import sys
@@ -12,7 +12,6 @@ from pinstack.core import (
     Checker,
     CheckerRegistry,
     Finding,
-    Severity,
     _matches_any_pattern,
     build_index,
     format_text,
@@ -39,7 +38,6 @@ class DummyChecker(Checker):
                         checker=self.name,
                         path=rel,
                         line=1,
-                        severity=Severity.WARNING,
                         message="dummy finding",
                     )
                 )
@@ -91,13 +89,11 @@ class TestFinding:
             checker="test",
             path="some/path/file.txt",
             line=42,
-            severity=Severity.ERROR,
             message="something is wrong",
         )
         assert f.checker == "test"
         assert f.path == "some/path/file.txt"
         assert f.line == 42
-        assert f.severity == Severity.ERROR
         assert f.message == "something is wrong"
 
     def test_finding_line_zero(self):
@@ -105,23 +101,9 @@ class TestFinding:
             checker="test",
             path="Dockerfile",
             line=0,
-            severity=Severity.WARNING,
             message="no specific line",
         )
         assert f.line == 0
-
-
-# ---------------------------------------------------------------------------
-# Severity
-# ---------------------------------------------------------------------------
-
-class TestSeverity:
-    def test_severity_ordering(self):
-        assert Severity.WARNING.value < Severity.ERROR.value
-
-    def test_severity_members(self):
-        assert Severity.WARNING in Severity
-        assert Severity.ERROR in Severity
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +126,6 @@ class TestChecker:
             assert len(results) == 1
             assert isinstance(results[0], Finding)
             assert results[0].checker == "dummy"
-            assert results[0].severity == Severity.WARNING
         finally:
             import shutil
             shutil.rmtree(root, ignore_errors=True)
@@ -398,43 +379,6 @@ class TestRunCheckers:
             import shutil
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_run_checkers_severity_filter_excludes_warnings(self):
-        root = _make_tmpdir_tree({"dummy.txt": ""})
-        try:
-            index = build_index(root, {"dummy.txt"})
-            checkers = [DummyChecker()]
-            findings = run_checkers(checkers, index, root, min_severity=Severity.ERROR)
-            # DummyChecker only emits WARNING findings
-            assert findings == []
-        finally:
-            import shutil
-            shutil.rmtree(root, ignore_errors=True)
-
-    def test_run_checkers_severity_filter_keeps_errors(self):
-        class ErrorChecker(Checker):
-            name = "error_checker"
-            description = "emits errors"
-            patterns = ["dummy.txt"]  # type: ignore[assignment]
-
-            def check(self, index, root):
-                return [Finding(
-                    checker=self.name,
-                    path="dummy.txt",
-                    line=1,
-                    severity=Severity.ERROR,
-                    message="error finding",
-                )]
-
-        root = _make_tmpdir_tree({"dummy.txt": ""})
-        try:
-            index = build_index(root, {"dummy.txt"})
-            checkers = [ErrorChecker()]
-            findings = run_checkers(checkers, index, root, min_severity=Severity.ERROR)
-            assert len(findings) == 1
-        finally:
-            import shutil
-            shutil.rmtree(root, ignore_errors=True)
-
     def test_run_checkers_checker_crash(self):
         root = _make_tmpdir_tree({"crash.txt": ""})
         try:
@@ -444,7 +388,6 @@ class TestRunCheckers:
             assert len(findings) == 1
             f = findings[0]
             assert f.checker == "crashing"
-            assert f.severity == Severity.ERROR
             assert "crashed" in f.message.lower() or "boom" in f.message
         finally:
             import shutil
@@ -463,9 +406,9 @@ class TestRunCheckers:
 
             def check(self, index, root):
                 return [
-                    Finding(checker=self.name, path="z.txt", line=1, severity=Severity.WARNING, message="z"),
-                    Finding(checker=self.name, path="a.txt", line=5, severity=Severity.WARNING, message="a5"),
-                    Finding(checker=self.name, path="a.txt", line=2, severity=Severity.WARNING, message="a2"),
+                    Finding(checker=self.name, path="z.txt", line=1, message="z"),
+                    Finding(checker=self.name, path="a.txt", line=5, message="a5"),
+                    Finding(checker=self.name, path="a.txt", line=2, message="a2"),
                 ]
 
         checkers = [MultiFindingChecker()]
@@ -485,12 +428,11 @@ class TestFormatText:
 
     def test_format_text_with_findings(self):
         findings = [
-            Finding(checker="test", path="req.txt", line=3, severity=Severity.ERROR, message="unpinned dep"),
-            Finding(checker="test", path="setup.cfg", line=0, severity=Severity.WARNING, message="no pin"),
+            Finding(checker="test", path="req.txt", line=3, message="unpinned dep"),
+            Finding(checker="test", path="setup.cfg", line=0, message="no pin"),
         ]
         output = format_text(findings)
         assert "FAIL" in output
-        assert "WARN" in output
         assert "req.txt:3" in output
         # line=0 => no colon+line number appended
         assert "setup.cfg:0" not in output
@@ -498,31 +440,28 @@ class TestFormatText:
         assert "unpinned dep" in output
         assert "no pin" in output
 
-    def test_format_text_fail_warn_tags(self):
+    def test_format_text_fail_tags(self):
         findings = [
-            Finding(checker="c", path="a.txt", line=1, severity=Severity.ERROR, message="err"),
-            Finding(checker="c", path="b.txt", line=1, severity=Severity.WARNING, message="warn"),
+            Finding(checker="c", path="a.txt", line=1, message="err"),
+            Finding(checker="c", path="b.txt", line=1, message="warn"),
         ]
         output = format_text(findings)
         lines = output.splitlines()
         fail_lines = [l for l in lines if l.startswith("FAIL")]
-        warn_lines = [l for l in lines if l.startswith("WARN")]
-        assert len(fail_lines) == 1
-        assert len(warn_lines) == 1
+        assert len(fail_lines) == 2
 
-    def test_format_text_error_and_warning_counts(self):
+    def test_format_text_error_counts(self):
         findings = [
-            Finding(checker="c", path="a.txt", line=1, severity=Severity.ERROR, message="e1"),
-            Finding(checker="c", path="b.txt", line=1, severity=Severity.ERROR, message="e2"),
-            Finding(checker="c", path="c.txt", line=1, severity=Severity.WARNING, message="w1"),
+            Finding(checker="c", path="a.txt", line=1, message="e1"),
+            Finding(checker="c", path="b.txt", line=1, message="e2"),
+            Finding(checker="c", path="c.txt", line=1, message="e3"),
         ]
         output = format_text(findings)
-        assert "2 errors" in output
-        assert "1 warning" in output
+        assert "3 error" in output
 
     def test_format_text_single_error_no_plural(self):
         findings = [
-            Finding(checker="c", path="a.txt", line=1, severity=Severity.ERROR, message="e"),
+            Finding(checker="c", path="a.txt", line=1, message="e"),
         ]
         output = format_text(findings)
         assert "1 error" in output
@@ -530,9 +469,9 @@ class TestFormatText:
 
     def test_format_text_summary_file_count(self):
         findings = [
-            Finding(checker="c", path="a.txt", line=1, severity=Severity.ERROR, message="e1"),
-            Finding(checker="c", path="a.txt", line=2, severity=Severity.ERROR, message="e2"),
-            Finding(checker="c", path="b.txt", line=1, severity=Severity.WARNING, message="w"),
+            Finding(checker="c", path="a.txt", line=1, message="e1"),
+            Finding(checker="c", path="a.txt", line=2, message="e2"),
+            Finding(checker="c", path="b.txt", line=1, message="e3"),
         ]
         output = format_text(findings)
         # 2 unique files
@@ -540,7 +479,7 @@ class TestFormatText:
 
     def test_format_text_single_file_no_plural(self):
         findings = [
-            Finding(checker="c", path="a.txt", line=1, severity=Severity.WARNING, message="w"),
+            Finding(checker="c", path="a.txt", line=1, message="w"),
         ]
         output = format_text(findings)
         assert "1 file" in output
@@ -548,7 +487,7 @@ class TestFormatText:
 
     def test_format_text_line_zero_no_colon(self):
         findings = [
-            Finding(checker="c", path="Makefile", line=0, severity=Severity.WARNING, message="no pin"),
+            Finding(checker="c", path="Makefile", line=0, message="no pin"),
         ]
         output = format_text(findings)
         # Should contain "Makefile" but NOT "Makefile:0"

@@ -8,7 +8,6 @@ from typing import List, Optional
 import pinstack
 from pinstack.core import (
     CheckerRegistry,
-    Severity,
     build_index,
     format_text,
     run_checkers,
@@ -66,12 +65,6 @@ def _build_parser():
         default="text",
         dest="output_format",
         help="Output format (default: text)",
-    )
-    parser.add_argument(
-        "--severity",
-        choices=["warning", "error"],
-        default="warning",
-        help="Minimum severity to report (default: warning = show all)",
     )
     parser.add_argument(
         "--exit-zero",
@@ -137,9 +130,6 @@ def main(argv=None):
         sys.stderr.write("Error: {}\n".format(exc))
         sys.exit(2)
 
-    severity_map = {"warning": Severity.WARNING, "error": Severity.ERROR}
-    min_severity = severity_map[args.severity]
-
     # Collect patterns from the selected checkers directly
     patterns = set()
     for checker in checkers:
@@ -153,7 +143,7 @@ def main(argv=None):
         max_index_size=args.max_files,
         extra_exclude_dirs=extra_exclude,
     )
-    findings = run_checkers(checkers, index, root, min_severity=min_severity)
+    findings = run_checkers(checkers, index, root)
 
     if args.output_format == "sarif":
         from pinstack.sarif import format_sarif

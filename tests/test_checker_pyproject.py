@@ -6,7 +6,6 @@ import shutil
 
 import pytest
 
-from pinstack.core import Severity
 from pinstack.checkers.pyproject import PyprojectChecker, extract_dependency_arrays
 
 # Base directory for pyproject fixtures — each case lives in a named subdir
@@ -191,10 +190,9 @@ class TestPyprojectCheckerBad:
         findings = _check_subdir("bad")
         assert len(findings) == 3, "flask>=, requests~=, certifi (bare) should give 3 findings"
 
-    def test_bad_toml_all_errors(self):
+    def test_bad_toml_has_three_findings(self):
         findings = _check_subdir("bad")
-        for f in findings:
-            assert f.severity == Severity.ERROR
+        assert len(findings) == 3
 
     def test_bad_toml_ge_operator_flagged(self):
         findings = _check_subdir("bad")
@@ -235,9 +233,9 @@ class TestPyprojectCheckerInline:
         assert len(findings) == 1
         assert "flask" in findings[0].message
 
-    def test_inline_finding_is_error(self):
+    def test_inline_has_one_finding(self):
         findings = _check_subdir("inline")
-        assert findings[0].severity == Severity.ERROR
+        assert len(findings) == 1
 
 
 class TestPyprojectCheckerNoDeps:
@@ -402,15 +400,14 @@ class TestPyprojectLockFileCheck:
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_lock_file_error_is_error_severity(self):
+    def test_lock_file_finding_present(self):
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml"}}
             findings = checker.check(index, tmpdir)
-            lock_errors = [f for f in findings if "lock file" in f.message]
-            assert len(lock_errors) == 1
-            assert lock_errors[0].severity == Severity.ERROR
+            lock_findings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_findings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

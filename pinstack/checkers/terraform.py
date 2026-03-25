@@ -4,7 +4,7 @@ import fnmatch
 import os
 from typing import Dict, List, Optional, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -49,7 +49,6 @@ class TerraformChecker(Checker):
                                 checker="terraform",
                                 path=rel_path,
                                 line=provider_line,
-                                severity=Severity.WARNING,
                                 message="provider '{}' is missing h1: hash in lock file".format(provider_name),
                             ))
                         in_provider = True
@@ -75,7 +74,6 @@ class TerraformChecker(Checker):
                                 checker="terraform",
                                 path=rel_path,
                                 line=provider_line,
-                                severity=Severity.WARNING,
                                 message="provider '{}' is missing h1: hash in lock file".format(provider_name),
                             ))
                         in_provider = False
@@ -100,7 +98,6 @@ class TerraformChecker(Checker):
                         checker="terraform",
                         path=rel_path,
                         line=provider_line,
-                        severity=Severity.WARNING,
                         message="provider '{}' is missing h1: hash in lock file".format(provider_name),
                     ))
 

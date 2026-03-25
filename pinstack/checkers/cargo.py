@@ -4,7 +4,7 @@ import fnmatch
 import os
 from typing import Dict, List, Optional, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -46,7 +46,6 @@ class CargoChecker(Checker):
                             checker="cargo",
                             path=rp,
                             line=pkg_line,
-                            severity=Severity.WARNING,
                             message="package '{}' from registry is missing checksum".format(pkg_name),
                         ))
 

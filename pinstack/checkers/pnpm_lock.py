@@ -3,7 +3,7 @@
 import os
 from typing import Dict, List, Optional, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -103,7 +103,6 @@ class PnpmLockChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=start_lineno,
-                            severity=Severity.WARNING,
                             message=(
                                 "'{}' is missing an integrity hash in pnpm-lock.yaml".format(pkg_key)
                             ),

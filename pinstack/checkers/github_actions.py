@@ -5,7 +5,7 @@ import os
 import re
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -77,7 +77,6 @@ class GitHubActionsChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=lineno,
-                            severity=Severity.ERROR,
                             message="action '{}' has no @ ref; pin to a full-length SHA".format(ref),
                         ))
                         continue
@@ -88,7 +87,6 @@ class GitHubActionsChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=lineno,
-                            severity=Severity.ERROR,
                             message="action '{}' is not pinned to a full-length SHA (got '{}')".format(
                                 action_part, pin
                             ),

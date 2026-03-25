@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -78,7 +78,6 @@ class PackageJsonChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            severity=Severity.ERROR,
                             message=(
                                 "'{}' in {} has unpinned version '{}'; use an exact version".format(
                                     pkg, section, version
@@ -92,7 +91,6 @@ class PackageJsonChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.ERROR,
                     message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
                 ))
 

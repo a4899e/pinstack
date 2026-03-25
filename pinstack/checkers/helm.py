@@ -4,7 +4,7 @@ import fnmatch
 import os
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -41,7 +41,6 @@ class HelmChecker(Checker):
                         checker="helm",
                         path=chart_yaml_rel,
                         line=0,
-                        severity=Severity.WARNING,
                         message="Chart.yaml declares dependencies but Chart.lock is missing; run 'helm dependency update'",
                     ))
 
@@ -95,7 +94,6 @@ class HelmChecker(Checker):
                         checker="helm",
                         path=rel_path,
                         line=dep_line,
-                        severity=Severity.WARNING,
                         message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
                     ))
                 dep_name = stripped[len("- name:"):].strip()
@@ -112,7 +110,6 @@ class HelmChecker(Checker):
                 checker="helm",
                 path=rel_path,
                 line=dep_line,
-                severity=Severity.WARNING,
                 message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
             ))
 

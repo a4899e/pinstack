@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -54,7 +54,6 @@ class PackageLockChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            severity=Severity.WARNING,
                             message=(
                                 "'{}' is missing an integrity hash in package-lock.json".format(pkg_key)
                             ),

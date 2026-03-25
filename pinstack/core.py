@@ -1,6 +1,5 @@
-"""Core types: Finding, Severity, Checker base, CheckerRegistry, FileIndex, runner, formatter."""
+"""Core types: Finding, Checker base, CheckerRegistry, FileIndex, runner, formatter."""
 
-import enum
 import fnmatch
 import os
 import sys
@@ -19,17 +18,11 @@ DEFAULT_MAX_INDEX_SIZE = 384
 FileIndex = Dict[str, Set[str]]
 
 
-class Severity(enum.Enum):
-    WARNING = 1
-    ERROR = 2
-
-
 @dataclass
 class Finding:
     checker: str
     path: str       # relative path
     line: int       # 1-based, 0 if N/A
-    severity: Severity
     message: str
 
 
@@ -112,7 +105,7 @@ def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFA
                 count += 1
                 if count >= max_index_size:
                     sys.stderr.write(
-                        "pinstack: warning: index limit reached ({} files), scan may be incomplete\n".format(
+                        "pinstack: index limit reached ({} files), scan may be incomplete\n".format(
                             max_index_size
                         )
                     )
@@ -124,8 +117,8 @@ def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFA
     return index
 
 
-def run_checkers(checkers, index, root, min_severity=None):
-    # type: (List[Checker], FileIndex, str, Optional[Severity]) -> List[Finding]
+def run_checkers(checkers, index, root):
+    # type: (List[Checker], FileIndex, str) -> List[Finding]
     """Run checkers against the index, return findings."""
     findings = []  # type: List[Finding]
     for checker in checkers:
@@ -136,13 +129,9 @@ def run_checkers(checkers, index, root, min_severity=None):
                 checker=checker.name,
                 path="<internal>",
                 line=0,
-                severity=Severity.ERROR,
                 message="Checker crashed: {}".format(exc),
             )]
         findings.extend(results)
-
-    if min_severity is not None:
-        findings = [f for f in findings if f.severity.value >= min_severity.value]
 
     # Sort by path then line
     findings.sort(key=lambda f: (f.path, f.line))
@@ -153,39 +142,26 @@ def format_text(findings):
     # type: (List[Finding]) -> str
     """Format findings as plain text. No colors."""
     lines = []  # type: List[str]
-    errors = 0
-    warnings = 0
     files = set()  # type: Set[str]
 
     for f in findings:
-        if f.severity == Severity.ERROR:
-            tag = "FAIL"
-            errors += 1
-        else:
-            tag = "WARN"
-            warnings += 1
         files.add(f.path)
         if f.line > 0:
             location = "{}:{}".format(f.path, f.line)
         else:
             location = f.path
-        lines.append("{}  {}  {}".format(tag, location, f.message))
+        lines.append("FAIL  {}  {}".format(location, f.message))
 
     # Summary line
-    parts = []  # type: List[str]
-    if errors:
-        parts.append("{} error{}".format(errors, "s" if errors != 1 else ""))
-    if warnings:
-        parts.append("{} warning{}".format(warnings, "s" if warnings != 1 else ""))
-    if not parts:
-        parts.append("0 findings")
-
+    count = len(findings)
     file_count = len(files)
-    summary = "{} in {} file{}".format(
-        ", ".join(parts),
-        file_count,
-        "s" if file_count != 1 else "",
-    )
+    if count == 0:
+        summary = "0 findings"
+    else:
+        summary = "{} error{} in {} file{}".format(
+            count, "s" if count != 1 else "",
+            file_count, "s" if file_count != 1 else "",
+        )
     lines.append("")
     lines.append(summary)
     return "\n".join(lines)

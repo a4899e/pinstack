@@ -5,7 +5,7 @@ import os
 import re
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -65,7 +65,6 @@ class DockerfileChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=lineno,
-                            severity=Severity.ERROR,
                             message="FROM '{}' is not pinned with @sha256: digest".format(image),
                         ))
 

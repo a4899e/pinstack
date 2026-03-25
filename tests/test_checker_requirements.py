@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-from pinstack.core import Severity, build_index
+from pinstack.core import build_index
 from pinstack.checkers.requirements import RequirementsChecker
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "requirements")
@@ -81,31 +81,27 @@ class TestRequirementsCheckerBad:
         findings = _check_fixture("requirements-bad.txt")
         assert len(findings) > 0
 
-    def test_bad_file_unpinned_is_error(self):
+    def test_bad_file_unpinned_has_findings(self):
         findings = _check_fixture("requirements-bad.txt")
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors) >= 2, "flask>=2.0.0 and bare 'requests' and django~=4.2 should all be ERRORs"
+        assert len(findings) >= 2, "flask>=2.0.0 and bare 'requests' and django~=4.2 should all produce findings"
 
     def test_bad_file_ge_operator_is_error(self):
         findings = _check_fixture("requirements-bad.txt")
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        paths_msgs = [(f.path, f.message) for f in errors]
-        has_ge = any("flask" in msg or ">=" in msg for _, msg in paths_msgs)
-        assert has_ge, "flask>=2.0.0 should produce an ERROR finding"
+        msgs = [f.message for f in findings]
+        has_ge = any("flask" in msg or ">=" in msg for msg in msgs)
+        assert has_ge, "flask>=2.0.0 should produce a finding"
 
     def test_bad_file_bare_name_is_error(self):
         findings = _check_fixture("requirements-bad.txt")
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        msgs = [f.message for f in errors]
+        msgs = [f.message for f in findings]
         has_bare = any("requests" in m for m in msgs)
-        assert has_bare, "bare 'requests' (no version) should produce an ERROR finding"
+        assert has_bare, "bare 'requests' (no version) should produce a finding"
 
     def test_bad_file_tilde_operator_is_error(self):
         findings = _check_fixture("requirements-bad.txt")
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        msgs = [f.message for f in errors]
+        msgs = [f.message for f in findings]
         has_tilde = any("django" in m or "~=" in m for m in msgs)
-        assert has_tilde, "django~=4.2 should produce an ERROR finding"
+        assert has_tilde, "django~=4.2 should produce a finding"
 
     def test_findings_have_line_numbers(self):
         findings = _check_fixture("requirements-bad.txt")
@@ -119,28 +115,17 @@ class TestRequirementsCheckerBad:
 
 
 class TestRequirementsCheckerNoHash:
-    def test_no_hash_produces_warnings(self):
+    def test_no_hash_produces_findings(self):
         findings = _check_fixture("requirements-bad_no_hash.txt")
-        assert len(findings) == 3, "Three ==pins without --hash should each get a WARNING"
-
-    def test_no_hash_severity_is_warning(self):
-        findings = _check_fixture("requirements-bad_no_hash.txt")
-        for f in findings:
-            assert f.severity == Severity.WARNING, "Missing hash should be WARNING not ERROR"
-
-    def test_no_hash_not_an_error(self):
-        findings = _check_fixture("requirements-bad_no_hash.txt")
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        assert errors == []
+        assert len(findings) == 3, "Three ==pins without --hash should each get a finding"
 
 
 class TestRequirementsCheckerMixed:
-    def test_mixed_file_has_both_errors_and_warnings(self):
+    def test_mixed_file_has_findings(self):
         findings = _check_fixture("requirements-mixed.txt")
-        severities = {f.severity for f in findings}
-        # requests>=2.0.0 -> ERROR, django (bare) -> ERROR; the two ==pinned entries with
-        # hash are fine; no hash warnings are NOT expected here because the ==pins DO have hashes
-        assert Severity.ERROR in severities
+        # requests>=2.0.0 -> finding, django (bare) -> finding; the two ==pinned entries with
+        # hash are fine; no hash findings are NOT expected here because the ==pins DO have hashes
+        assert len(findings) > 0
 
     def test_mixed_file_pinned_with_hash_not_flagged(self):
         """flask==2.3.2 --hash=... and certifi==... --hash=... should be clean."""

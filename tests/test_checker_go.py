@@ -2,7 +2,6 @@
 
 import os
 
-from pinstack.core import Severity
 from pinstack.checkers.go import GoChecker
 
 GO_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "go")
@@ -36,8 +35,8 @@ class TestGoModOnly:
     def test_one_error(self):
         assert len(self.findings) == 1, "go.mod without go.sum should produce 1 ERROR"
 
-    def test_is_error(self):
-        assert self.findings[0].severity == Severity.ERROR
+    def test_has_one_finding(self):
+        assert len(self.findings) == 1
 
     def test_message_mentions_go_sum(self):
         assert "go.sum" in self.findings[0].message
@@ -53,14 +52,13 @@ class TestGoMissingHash:
     def setup_method(self):
         self.findings = _check("missing_hash")
 
-    def test_has_warning(self):
-        warnings = [f for f in self.findings if f.severity == Severity.WARNING]
-        assert len(warnings) >= 1, "go.sum line without h1: should produce WARNING(s), got: {}".format(
+    def test_has_finding(self):
+        assert len(self.findings) >= 1, "go.sum line without h1: should produce finding(s), got: {}".format(
             [f.message for f in self.findings]
         )
 
-    def test_warning_mentions_h1(self):
-        msgs = [f.message for f in self.findings if f.severity == Severity.WARNING]
+    def test_finding_mentions_h1(self):
+        msgs = [f.message for f in self.findings]
         assert any("h1:" in m for m in msgs)
 
     def test_checker_name(self):

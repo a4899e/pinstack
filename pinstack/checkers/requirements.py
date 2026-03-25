@@ -5,7 +5,7 @@ import os
 import re
 from typing import Dict, List, Set
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -141,7 +141,6 @@ class RequirementsChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=start_lineno,
-                            severity=Severity.ERROR,
                             message="'{}' is not pinned with ==; use package==version".format(pkg_name),
                         ))
                     elif hash_warn:
@@ -149,7 +148,6 @@ class RequirementsChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=start_lineno,
-                            severity=Severity.WARNING,
                             message="'{}' is pinned with == but missing --hash=; add integrity hash".format(pkg_name),
                         ))
 

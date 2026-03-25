@@ -4,7 +4,7 @@ import json
 from typing import List
 
 import pinstack
-from pinstack.core import Finding, Severity
+from pinstack.core import Finding
 
 
 def format_sarif(findings):
@@ -20,10 +20,9 @@ def format_sarif(findings):
                 "shortDescription": {"text": rule_id},
             }
 
-        level = "error" if f.severity == Severity.ERROR else "warning"
         result = {
             "ruleId": rule_id,
-            "level": level,
+            "level": "error",
             "message": {"text": f.message},
             "locations": [
                 {

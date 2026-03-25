@@ -2,7 +2,6 @@
 
 import os
 
-from pinstack.core import Severity
 from pinstack.checkers.github_actions import GitHubActionsChecker
 
 GHA_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "gha")
@@ -57,9 +56,8 @@ class TestGHABad:
             len(self.findings), [f.message for f in self.findings]
         )
 
-    def test_all_errors(self):
-        for f in self.findings:
-            assert f.severity == Severity.ERROR
+    def test_has_two_findings(self):
+        assert len(self.findings) == 2
 
     def test_checkout_v4_flagged(self):
         msgs = [f.message for f in self.findings]

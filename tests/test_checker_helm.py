@@ -2,7 +2,6 @@
 
 import os
 
-from pinstack.core import Severity
 from pinstack.checkers.helm import HelmChecker
 
 HELM_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "helm")
@@ -53,8 +52,8 @@ class TestHelmNoLock:
             len(self.findings), [f.message for f in self.findings]
         )
 
-    def test_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
+    def test_has_one_finding(self):
+        assert len(self.findings) == 1
 
     def test_message_mentions_lock(self):
         assert "Chart.lock" in self.findings[0].message
@@ -75,8 +74,8 @@ class TestHelmBadDigest:
             len(self.findings), [f.message for f in self.findings]
         )
 
-    def test_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
+    def test_has_one_finding(self):
+        assert len(self.findings) == 1
 
     def test_message_mentions_digest(self):
         assert "digest" in self.findings[0].message

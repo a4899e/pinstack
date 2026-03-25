@@ -5,7 +5,7 @@ import os
 import re
 from typing import Dict, List, Set, Tuple
 
-from pinstack.core import Checker, Finding, Severity
+from pinstack.core import Checker, Finding
 
 FileIndex = Dict[str, Set[str]]
 
@@ -285,7 +285,6 @@ class PyprojectChecker(Checker):
                         checker=self.name,
                         path=rel_path,
                         line=lineno,
-                        severity=Severity.ERROR,
                         message=msg,
                     ))
 
@@ -295,7 +294,6 @@ class PyprojectChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.ERROR,
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
                 ))
 

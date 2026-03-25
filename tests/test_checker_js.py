@@ -5,7 +5,6 @@ import os
 import shutil
 import tempfile
 
-from pinstack.core import Severity
 from pinstack.checkers.package_json import PackageJsonChecker
 from pinstack.checkers.package_lock import PackageLockChecker
 from pinstack.checkers.yarn_lock import YarnLockChecker
@@ -91,12 +90,9 @@ class TestPackageJsonBad:
         msgs = [f.message for f in self.findings]
         assert any("react" in m for m in msgs), "react ^18.0.0 should be flagged"
 
-    def test_all_findings_are_errors(self):
-        # 4 pinning errors + 1 missing lock file error = 5
-        error_findings = [f for f in self.findings if f.severity == Severity.ERROR]
-        assert len(error_findings) == 5
-        for f in error_findings:
-            assert f.severity == Severity.ERROR
+    def test_all_findings_count(self):
+        # 4 pinning errors + 1 missing lock file finding = 5
+        assert len(self.findings) == 5
 
     def test_findings_line_zero(self):
         for f in self.findings:
@@ -142,9 +138,6 @@ class TestPackageLockBad:
             len(self.findings), [f.message for f in self.findings]
         )
 
-    def test_finding_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
-
     def test_finding_message_contains_package(self):
         assert "lodash" in self.findings[0].message
 
@@ -176,9 +169,6 @@ class TestYarnLockBad:
         assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
             len(self.findings), [f.message for f in self.findings]
         )
-
-    def test_finding_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
 
     def test_finding_message_contains_package(self):
         assert "lodash" in self.findings[0].message
@@ -214,9 +204,6 @@ class TestPnpmLockBad:
         assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
             len(self.findings), [f.message for f in self.findings]
         )
-
-    def test_finding_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
 
     def test_finding_message_contains_package(self):
         assert "lodash" in self.findings[0].message
@@ -314,15 +301,14 @@ class TestPackageJsonLockFileCheck:
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_lock_file_error_is_error_severity(self):
+    def test_lock_file_finding_present(self):
         tmpdir = tempfile.mkdtemp()
         try:
             _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json"}}
             findings = checker.check(index, tmpdir)
-            lock_errors = [f for f in findings if "lock file" in f.message]
-            assert len(lock_errors) == 1
-            assert lock_errors[0].severity == Severity.ERROR
+            lock_findings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_findings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

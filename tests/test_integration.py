@@ -274,7 +274,7 @@ class TestExitZeroOverrides:
             _write(os.path.join(d, "requirements.txt"), _BAD_REQUIREMENTS)
             rc, out, err = run_pinstack(d, "--exit-zero")
             # Output should still contain findings even though exit is 0
-            assert "FAIL" in out or "WARN" in out
+            assert "FAIL" in out
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
@@ -315,7 +315,7 @@ class TestCheckFlagLimitsCheckers:
             # pyproject.toml lines should NOT appear in the output findings
             lines_with_pyproject = [
                 ln for ln in out.splitlines()
-                if "pyproject.toml" in ln and ("FAIL" in ln or "WARN" in ln)
+                if "pyproject.toml" in ln and "FAIL" in ln
             ]
             assert lines_with_pyproject == []
         finally:
@@ -357,7 +357,7 @@ class TestExcludeFlag:
             # requirements.txt lines should NOT be in findings
             finding_lines = [
                 ln for ln in out.splitlines()
-                if "requirements.txt" in ln and ("FAIL" in ln or "WARN" in ln)
+                if "requirements.txt" in ln and "FAIL" in ln
             ]
             assert finding_lines == []
         finally:
@@ -372,50 +372,9 @@ class TestExcludeFlag:
             rc, out, err = run_pinstack(d, "--exclude", "requirements,pyproject")
             # Neither requirements.txt nor pyproject.toml finding lines should appear
             for ln in out.splitlines():
-                if "FAIL" in ln or "WARN" in ln:
+                if "FAIL" in ln:
                     assert "requirements.txt" not in ln
                     assert "pyproject.toml" not in ln
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# test_severity_error_only
-# ---------------------------------------------------------------------------
-
-class TestSeverityErrorOnly:
-    def test_only_fail_lines_with_severity_error(self):
-        d = _tmpdir()
-        try:
-            # requirements.txt with both missing-pin (ERROR) and missing-hash (WARNING)
-            content = (
-                "requests>=2.0\n"                   # ERROR: not == pinned
-                "urllib3==2.0.7\n"                  # WARNING: pinned but no hash
-            )
-            _write(os.path.join(d, "requirements.txt"), content)
-            rc, out, err = run_pinstack(d, "--severity", "error")
-            # WARN lines must not appear
-            assert "WARN" not in out
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-
-    def test_fail_lines_present_with_severity_error(self):
-        d = _tmpdir()
-        try:
-            content = "requests>=2.0\n"  # ERROR
-            _write(os.path.join(d, "requirements.txt"), content)
-            rc, out, err = run_pinstack(d, "--severity", "error")
-            assert "FAIL" in out
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-
-    def test_exit_one_with_errors_present(self):
-        d = _tmpdir()
-        try:
-            content = "requests>=2.0\n"  # ERROR
-            _write(os.path.join(d, "requirements.txt"), content)
-            rc, out, err = run_pinstack(d, "--severity", "error")
-            assert rc == 1
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
@@ -526,7 +485,7 @@ class TestSelfScan:
         """With fixtures excluded, pinstack's pyproject.toml has no companion lock file."""
         rc, out, err = run_pinstack(PROJECT_ROOT, "--exclude-dir", "fixtures")
         # pinstack's own pyproject.toml has deps but no lock file, so we expect
-        # exactly one WARNING finding about the missing lock file.
+        # a finding about the missing lock file.
         assert rc == 1
         assert "lock file" in out
 

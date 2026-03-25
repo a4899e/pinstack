@@ -2,7 +2,6 @@
 
 import os
 
-from pinstack.core import Severity
 from pinstack.checkers.gemfile import GemfileChecker
 
 GEMFILE_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "gemfile")
@@ -37,8 +36,8 @@ class TestGemfileOnly:
     def test_one_warning(self):
         assert len(self.findings) == 1, "Gemfile without Gemfile.lock should produce 1 WARNING"
 
-    def test_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
+    def test_has_one_finding(self):
+        assert len(self.findings) == 1
 
     def test_message_mentions_lock(self):
         assert "Gemfile.lock" in self.findings[0].message

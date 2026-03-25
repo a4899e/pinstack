@@ -2,7 +2,6 @@
 
 import os
 
-from pinstack.core import Severity
 from pinstack.checkers.cargo import CargoChecker
 
 CARGO_FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "cargo")
@@ -40,8 +39,8 @@ class TestCargoBad:
             len(self.findings), [f.message for f in self.findings]
         )
 
-    def test_is_warning(self):
-        assert self.findings[0].severity == Severity.WARNING
+    def test_has_one_finding(self):
+        assert len(self.findings) == 1
 
     def test_tokio_flagged(self):
         assert "tokio" in self.findings[0].message
