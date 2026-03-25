@@ -167,19 +167,24 @@ class PackageJsonChecker(Checker):
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_js_lock_names(full_path, lock_filename)
                 if lock_names:
+                    missing = []  # type: List[str]
                     for section in _DEP_SECTIONS:
                         deps = data.get(section)
                         if not deps or not isinstance(deps, dict):
                             continue
                         for pkg in sorted(deps.keys()):
                             if pkg not in lock_names:
-                                findings.append(Finding(
-                                    checker=self.name,
-                                    path=rel_path,
-                                    line=0,
-                                    message="dependency '{}' not found in {}".format(
-                                        pkg, lock_filename
-                                    ),
-                                ))
+                                missing.append(pkg)
+                    if missing:
+                        findings.append(Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="{} is stale: missing {} ({})".format(
+                                lock_filename,
+                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                        ))
 
         return findings

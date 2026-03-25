@@ -130,15 +130,19 @@ class GoChecker(Checker):
             gomod_deps = _parse_gomod_deps(mod_path)
             gosum_modules = _parse_gosum_modules(sum_path)
 
+            missing = []  # type: List[str]
             for dep in gomod_deps:
-                # go.sum lines have "<module> <version> <hash>" — module name matches dep exactly
-                # Also accept "<dep>/go.mod" entries as presence evidence
                 if dep not in gosum_modules and (dep + "/go.mod") not in gosum_modules:
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_mod,
-                        line=0,
-                        message="dependency '{}' in go.mod not found in go.sum".format(dep),
-                    ))
+                    missing.append(dep)
+            if missing:
+                findings.append(Finding(
+                    checker=self.name,
+                    path=rel_sum,
+                    line=0,
+                    message="go.sum is stale: missing {} ({})".format(
+                        "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                        ", ".join(sorted(missing)),
+                    ),
+                ))
 
         return findings

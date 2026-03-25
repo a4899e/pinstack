@@ -134,13 +134,16 @@ class CargoChecker(Checker):
                 toml_deps = _parse_cargo_toml_deps(toml_path)
                 lock_names = _parse_cargo_lock_names(lines)
 
-                for dep in toml_deps:
-                    if dep not in lock_names:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_toml,
-                            line=0,
-                            message="dependency '{}' in Cargo.toml not found in Cargo.lock".format(dep),
-                        ))
+                missing = [dep for dep in toml_deps if dep not in lock_names]
+                if missing:
+                    findings.append(Finding(
+                        checker=self.name,
+                        path=rel_lock,
+                        line=0,
+                        message="Cargo.lock is stale: missing {} ({})".format(
+                            "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                            ", ".join(sorted(missing)),
+                        ),
+                    ))
 
         return findings

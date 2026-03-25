@@ -134,6 +134,7 @@ class GradleChecker(Checker):
                 lock_coords = _parse_lockfile_coords(lock_path)
 
             # Check dependency versions in each build file
+            missing_from_lock = []  # type: List[str]
             for fname in build_files:
                 full_path = os.path.join(dir_path, fname)
                 rel_path = os.path.relpath(full_path, root)
@@ -155,7 +156,6 @@ class GradleChecker(Checker):
                     coord = "{}:{}".format(group, artifact)
 
                     if version is None:
-                        # No version segment at all: group:artifact
                         findings.append(Finding(
                             checker=self.name,
                             path=rel_path,
@@ -174,13 +174,20 @@ class GradleChecker(Checker):
                         ))
                         continue
 
-                    # Version is pinned and valid: cross-reference against lockfile
+                    # Version is pinned and valid: collect for cross-reference
                     if has_lockfile and coord not in lock_coords:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="dependency '{}' in {} not found in gradle.lockfile".format(coord, fname),
-                        ))
+                        missing_from_lock.append(coord)
+
+            if missing_from_lock:
+                lock_rel = os.path.relpath(os.path.join(dir_path, "gradle.lockfile"), root)
+                findings.append(Finding(
+                    checker=self.name,
+                    path=lock_rel,
+                    line=0,
+                    message="gradle.lockfile is stale: missing {} ({})".format(
+                        "{} dependency".format(len(missing_from_lock)) if len(missing_from_lock) == 1 else "{} dependencies".format(len(missing_from_lock)),
+                        ", ".join(sorted(missing_from_lock)),
+                    ),
+                ))
 
         return findings

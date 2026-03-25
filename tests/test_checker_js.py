@@ -344,7 +344,7 @@ class TestPackageJsonLockFileCrossRef:
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "package-lock.json"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert len(cross_ref) == 1
             assert "lodash" in cross_ref[0].message
             assert "package-lock.json" in cross_ref[0].message
@@ -370,7 +370,7 @@ class TestPackageJsonLockFileCrossRef:
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "package-lock.json"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -391,7 +391,7 @@ class TestPackageJsonLockFileCrossRef:
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "yarn.lock"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert len(cross_ref) == 1
             assert "lodash" in cross_ref[0].message
             assert "yarn.lock" in cross_ref[0].message
@@ -414,7 +414,7 @@ class TestPackageJsonLockFileCrossRef:
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "pnpm-lock.yaml"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert len(cross_ref) == 1
             assert "lodash" in cross_ref[0].message
             assert "pnpm-lock.yaml" in cross_ref[0].message

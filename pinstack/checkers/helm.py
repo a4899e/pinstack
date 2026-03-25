@@ -55,14 +55,17 @@ class HelmChecker(Checker):
                 if has_chart_yaml:
                     yaml_deps = self._parse_dep_names(chart_yaml_path)
                     lock_deps = self._parse_dep_names(chart_lock_path)
-                    for dep in sorted(yaml_deps):
-                        if dep not in lock_deps:
-                            findings.append(Finding(
-                                checker="helm",
-                                path=chart_yaml_rel,
-                                line=0,
-                                message="dependency '{}' in Chart.yaml not found in Chart.lock".format(dep),
-                            ))
+                    missing = [dep for dep in sorted(yaml_deps) if dep not in lock_deps]
+                    if missing:
+                        findings.append(Finding(
+                            checker="helm",
+                            path=chart_lock_rel,
+                            line=0,
+                            message="Chart.lock is stale: missing {} ({})".format(
+                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                        ))
 
         return findings
 

@@ -41,15 +41,15 @@ class TestGoDepMissingFromGoSum:
 
     def test_message_format(self):
         msgs = [f.message for f in self.findings]
-        assert any("not found in go.sum" in m for m in msgs)
+        assert any("stale" in m for m in msgs)
 
     def test_checker_name(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert len(cross_ref) >= 1
         assert cross_ref[0].checker == "go"
 
     def test_path_is_relative(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert not os.path.isabs(cross_ref[0].path)
 
 
@@ -72,7 +72,7 @@ class TestGoDepPresentInGoSum:
         self.findings = GoChecker().check(index, self.tmpdir)
 
     def test_dep_in_gomod_present_in_gosum(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert cross_ref == [], (
             "No cross-ref findings expected when dep is in go.sum, got: {}".format(
                 [f.message for f in cross_ref]
@@ -103,7 +103,7 @@ class TestGoModRequireBlockParsed:
         self.findings = GoChecker().check(index, self.tmpdir)
 
     def test_gomod_require_block_parsed(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         missing = [f.message for f in cross_ref]
         assert any("github.com/not/insum" in m for m in missing), (
             "Expected github.com/not/insum to be flagged, got: {}".format(missing)
@@ -113,16 +113,16 @@ class TestGoModRequireBlockParsed:
         )
 
     def test_present_dep_not_flagged(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         missing = [f.message for f in cross_ref]
         assert not any("github.com/in/sum" in m for m in missing), (
             "github.com/in/sum should NOT be flagged, got: {}".format(missing)
         )
 
     def test_two_missing_deps_flagged(self):
-        cross_ref = [f for f in self.findings if "not found in go.sum" in f.message]
-        assert len(cross_ref) == 2, (
-            "Expected exactly 2 cross-ref findings, got {}: {}".format(
+        cross_ref = [f for f in self.findings if "stale" in f.message]
+        assert len(cross_ref) == 1, (
+            "Expected exactly 1 summary cross-ref finding, got {}: {}".format(
                 len(cross_ref), [f.message for f in cross_ref]
             )
         )

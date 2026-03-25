@@ -97,13 +97,17 @@ class GemfileChecker(Checker):
                 gemfile_deps = _parse_gemfile_deps(gemfile_path)
                 lock_specs = _parse_gemfile_lock_specs(lock_path)
 
-                for dep in gemfile_deps:
-                    if dep not in lock_specs:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_gemfile,
-                            line=0,
-                            message="dependency '{}' in Gemfile not found in Gemfile.lock".format(dep),
-                        ))
+                missing = [dep for dep in gemfile_deps if dep not in lock_specs]
+                if missing:
+                    rel_lock = os.path.relpath(lock_path, root)
+                    findings.append(Finding(
+                        checker=self.name,
+                        path=rel_lock,
+                        line=0,
+                        message="Gemfile.lock is stale: missing {} ({})".format(
+                            "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                            ", ".join(sorted(missing)),
+                        ),
+                    ))
 
         return findings

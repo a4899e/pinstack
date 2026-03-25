@@ -201,7 +201,7 @@ class TestGradleCrossRef:
             "empty=\n"
         )
         findings = self._make_index("build.gradle", build_gradle, lockfile)
-        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert len(cross_ref) == 1, "Expected 1 cross-ref finding, got: {}".format(
             [f.message for f in findings]
         )
@@ -220,7 +220,7 @@ class TestGradleCrossRef:
             "empty=\n"
         )
         findings = self._make_index("build.gradle", build_gradle, lockfile)
-        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert cross_ref == [], "Dep present in lockfile — expected no cross-ref findings, got: {}".format(
             [f.message for f in findings]
         )
@@ -237,7 +237,7 @@ class TestGradleCrossRef:
             "empty=\n"
         )
         findings = self._make_index("build.gradle.kts", build_gradle_kts, lockfile)
-        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert len(cross_ref) == 1, "Expected 1 cross-ref finding for Kotlin DSL, got: {}".format(
             [f.message for f in findings]
         )
@@ -257,13 +257,12 @@ class TestGradleCrossRef:
             "empty=\n"
         )
         findings = self._make_index("build.gradle", build_gradle, lockfile)
-        cross_ref = [f for f in findings if "not found in gradle.lockfile" in f.message]
-        assert len(cross_ref) == 2, "Expected 2 cross-ref findings, got: {}".format(
+        cross_ref = [f for f in findings if "stale" in f.message]
+        assert len(cross_ref) == 1, "Expected 1 summary cross-ref finding, got: {}".format(
             [f.message for f in findings]
         )
-        missing_coords = {f.message for f in cross_ref}
-        assert any("org.slf4j:slf4j-api" in m for m in missing_coords)
-        assert any("org.apache.commons:commons-lang3" in m for m in missing_coords)
+        assert "org.slf4j:slf4j-api" in cross_ref[0].message
+        assert "org.apache.commons:commons-lang3" in cross_ref[0].message
 
 
 class TestGradleNoGradle:

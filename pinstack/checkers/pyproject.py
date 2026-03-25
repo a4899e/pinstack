@@ -357,19 +357,24 @@ class PyprojectChecker(Checker):
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_lock_file_names(full_path, lock_filename)
                 if lock_names:
+                    missing = []  # type: List[str]
                     for deps, label in dep_arrays:
                         for dep in deps:
                             raw_name = _extract_name_from_dep(dep)
                             normalized = _normalize_python_name(raw_name)
                             if normalized not in lock_names:
-                                findings.append(Finding(
-                                    checker=self.name,
-                                    path=rel_path,
-                                    line=0,
-                                    message="dependency '{}' not found in {}".format(
-                                        normalized, lock_filename
-                                    ),
-                                ))
+                                missing.append(normalized)
+                    if missing:
+                        findings.append(Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="{} is stale: missing {} ({})".format(
+                                lock_filename,
+                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                        ))
 
         return findings
 

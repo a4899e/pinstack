@@ -62,26 +62,26 @@ class TestDepInCargoTomlMissingFromLock:
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dep_in_cargo_toml_missing_from_lock(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         msgs = [f.message for f in cross_ref]
         assert any("missing_crate" in m for m in msgs), (
             "Expected finding for missing_crate, got: {}".format(msgs)
         )
 
     def test_present_dep_not_flagged(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         msgs = [f.message for f in cross_ref]
         assert not any("serde" in m for m in msgs), (
             "serde should NOT be flagged, got: {}".format(msgs)
         )
 
     def test_checker_name(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert len(cross_ref) >= 1
         assert cross_ref[0].checker == "cargo"
 
     def test_path_is_relative(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert not os.path.isabs(cross_ref[0].path)
 
 
@@ -103,7 +103,7 @@ class TestDepInCargoTomlPresentInLock:
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dep_in_cargo_toml_present_in_lock(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert cross_ref == [], (
             "No cross-ref findings expected when all deps are in lock, got: {}".format(
                 [f.message for f in cross_ref]
@@ -131,7 +131,7 @@ class TestDevDepsChecked:
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dev_deps_checked(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         msgs = [f.message for f in cross_ref]
         assert any("criterion" in m for m in msgs), (
             "Expected criterion (dev-dep) to be flagged, got: {}".format(msgs)
@@ -148,7 +148,7 @@ class TestNoCargoToml:
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_no_cargo_toml(self):
-        cross_ref = [f for f in self.findings if "not found in Cargo.lock" in f.message]
+        cross_ref = [f for f in self.findings if "stale" in f.message]
         assert cross_ref == [], (
             "No cross-ref findings expected when Cargo.toml absent, got: {}".format(
                 [f.message for f in cross_ref]

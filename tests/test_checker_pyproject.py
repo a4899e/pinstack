@@ -439,7 +439,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert len(cross_ref) == 1
             assert "flask" in cross_ref[0].message
             assert "requirements.txt" in cross_ref[0].message
@@ -456,7 +456,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -479,7 +479,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -502,7 +502,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -525,7 +525,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -548,7 +548,7 @@ class TestPyprojectLockFileCrossRef:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "uv.lock"}}
             findings = checker.check(index, tmpdir)
-            cross_ref = [f for f in findings if "not found in" in f.message]
+            cross_ref = [f for f in findings if "stale" in f.message]
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

@@ -124,7 +124,7 @@ class TestHelmCrossRef:
             "generated: \"2024-01-01T00:00:00Z\"\n"
         )
         findings = self._make_index(chart_yaml, chart_lock)
-        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert len(cross_ref) == 1, "Expected 1 cross-ref finding, got: {}".format(
             [f.message for f in findings]
         )
@@ -149,7 +149,7 @@ class TestHelmCrossRef:
             "generated: \"2024-01-01T00:00:00Z\"\n"
         )
         findings = self._make_index(chart_yaml, chart_lock)
-        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert cross_ref == [], "All deps present in lock — expected no cross-ref findings, got: {}".format(
             [f.message for f in findings]
         )
@@ -175,7 +175,7 @@ class TestHelmCrossRef:
             "generated: \"2024-01-01T00:00:00Z\"\n"
         )
         findings = self._make_index(chart_yaml, chart_lock)
-        cross_ref = [f for f in findings if "not found in Chart.lock" in f.message]
+        cross_ref = [f for f in findings if "stale" in f.message]
         assert len(cross_ref) == 1, "Expected 1 cross-ref finding for missing redis, got: {}".format(
             [f.message for f in findings]
         )
