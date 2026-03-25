@@ -1,0 +1,6 @@
+version: "3.8"
+services:
+  app:
+    build: .
+  sidecar:
+    image: redis@sha256:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2

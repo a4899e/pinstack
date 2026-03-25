@@ -1,0 +1,9 @@
+name: Deploy
+on: [push]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675
+      - uses: ./local-action
+      - uses: docker://alpine:3.18

@@ -1,0 +1,8 @@
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675
+      - uses: actions/setup-python@13ae5bb136fac2878aff545f9c64e53a3dedc405
