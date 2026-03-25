@@ -1,0 +1,3 @@
+-r base.txt
+-r other-requirements.txt
+-e git+https://github.com/example/pkg.git#egg=pkg

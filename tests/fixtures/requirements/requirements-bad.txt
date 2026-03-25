@@ -1,0 +1,5 @@
+flask>=2.0.0
+requests
+certifi==2023.7.22 \
+    --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+django~=4.2
