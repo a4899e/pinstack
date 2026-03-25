@@ -31,7 +31,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.0.2", "ruff==0.15.7", "pyright==1.1.408"]
+dev = ["pytest==9.0.2", "ruff==0.15.7", "invoke==2.2.1"]
 
 [project.scripts]
 pinstack = "pinstack.cli:main"
