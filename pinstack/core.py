@@ -89,14 +89,15 @@ def _matches_any_pattern(filename, patterns):
     return False
 
 
-def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFAULT_MAX_INDEX_SIZE):
-    # type: (str, Set[str], int, int) -> FileIndex
+def build_index(root, patterns, max_depth=DEFAULT_MAX_DEPTH, max_index_size=DEFAULT_MAX_INDEX_SIZE, extra_exclude_dirs=None):
+    # type: (str, Set[str], int, int, Optional[Set[str]]) -> FileIndex
     """Single os.walk, filtered to only interesting files."""
+    excluded = EXCLUDED_DIRS | extra_exclude_dirs if extra_exclude_dirs else EXCLUDED_DIRS
     index = {}  # type: FileIndex
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded dirs (modify in-place)
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in excluded)
         # Enforce max depth
         rel = os.path.relpath(dirpath, root)
         depth = 0 if rel == "." else rel.count(os.sep) + 1

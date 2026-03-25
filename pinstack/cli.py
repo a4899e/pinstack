@@ -94,6 +94,13 @@ def _build_parser():
         help="Max files to index (default: {})".format(DEFAULT_MAX_INDEX_SIZE),
     )
     parser.add_argument(
+        "--exclude-dir",
+        type=lambda s: [x.strip() for x in s.split(",")],
+        default=None,
+        metavar="DIR,DIR",
+        help="Additional directory names to skip during traversal (comma-separated)",
+    )
+    parser.add_argument(
         "--list-checkers",
         action="store_true",
         default=False,
@@ -138,11 +145,13 @@ def main(argv=None):
     for checker in checkers:
         patterns.update(checker.patterns)
 
+    extra_exclude = set(args.exclude_dir) if args.exclude_dir else None
     index = build_index(
         root,
         patterns,
         max_depth=args.max_depth,
         max_index_size=args.max_files,
+        extra_exclude_dirs=extra_exclude,
     )
     findings = run_checkers(checkers, index, root, min_severity=min_severity)
 

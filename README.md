@@ -107,6 +107,7 @@ pinstack [PATH] [OPTIONS]
 | `--exit-zero` | Always exit 0, even when findings are present. Useful for advisory-only runs. |
 | `--max-depth N` | Maximum directory depth to recurse into. Default: 4. |
 | `--max-files N` | Maximum number of files to index. Default: 384. |
+| `--exclude-dir DIR,DIR` | Additional directory names to skip during traversal (comma-separated). |
 | `--list-checkers` | Print all available checkers and exit. |
 | `--version` | Print the pinstack version and exit. |
 

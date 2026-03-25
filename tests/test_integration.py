@@ -532,3 +532,40 @@ class TestSelfScan:
         data = json.loads(out)
         assert "runs" in data
         assert data["version"] == "2.1.0"
+
+
+# ---------------------------------------------------------------------------
+# --exclude-dir
+# ---------------------------------------------------------------------------
+
+class TestExcludeDir:
+    def test_exclude_dir_skips_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            # Create a bad requirements.txt inside a subdir called "checkouts"
+            subdir = os.path.join(d, "checkouts")
+            os.makedirs(subdir)
+            with open(os.path.join(subdir, "requirements.txt"), "w") as f:
+                f.write("requests\n")
+            # Also create one at the root
+            with open(os.path.join(d, "requirements.txt"), "w") as f:
+                f.write("flask\n")
+            # Without --exclude-dir, both are found
+            rc, out, _ = run_pinstack(d)
+            assert rc == 1
+            assert "checkouts" in out
+            # With --exclude-dir, only root is found
+            rc2, out2, _ = run_pinstack("--exclude-dir", "checkouts", d)
+            assert rc2 == 1
+            assert "checkouts" not in out2
+            assert "requirements.txt" in out2
+
+    def test_exclude_dir_multiple(self):
+        with tempfile.TemporaryDirectory() as d:
+            for dirname in ["build", "dist"]:
+                subdir = os.path.join(d, dirname)
+                os.makedirs(subdir)
+                with open(os.path.join(subdir, "requirements.txt"), "w") as f:
+                    f.write("requests\n")
+            rc, out, _ = run_pinstack("--exclude-dir", "build,dist", d)
+            assert rc == 0
+            assert "0 findings" in out
