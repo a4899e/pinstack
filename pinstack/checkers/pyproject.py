@@ -243,6 +243,61 @@ _LOCK_FILES = frozenset([
 ])
 
 
+def _normalize_python_name(name):
+    # type: (str) -> str
+    """Normalize a Python package name per PEP 503: lowercase, replace - and . with _."""
+    # Strip extras like [extra1,extra2]
+    bracket = name.find("[")
+    if bracket >= 0:
+        name = name[:bracket]
+    return re.sub(r'[-._]+', '_', name.strip().lower())
+
+
+def _extract_name_from_dep(dep):
+    # type: (str) -> str
+    """Extract the package name from a PEP 508 dependency string."""
+    m = _DEP_RE.match(dep.strip())
+    if m:
+        return m.group(1)
+    # Fallback: take everything before first operator/space/semicolon
+    for ch in ('>', '<', '=', '!', '~', ';', ' ', '['):
+        pos = dep.find(ch)
+        if pos >= 0:
+            return dep[:pos]
+    return dep
+
+
+def _extract_lock_file_names(full_path, lock_filename):
+    # type: (str, str) -> Set[str]
+    """Extract normalized package names from a Python lock file."""
+    lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
+    names = set()  # type: Set[str]
+    try:
+        with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return names
+
+    if lock_filename == "requirements.txt":
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            # Extract package name (before ==, >=, [, space, etc.)
+            m = _DEP_RE.match(line)
+            if m:
+                names.add(_normalize_python_name(m.group(1)))
+    else:
+        # poetry.lock, pdm.lock, uv.lock: look for name = "pkg" lines
+        name_re = re.compile(r'^name\s*=\s*"([^"]+)"')
+        for line in content.splitlines():
+            m = name_re.match(line.strip())
+            if m:
+                names.add(_normalize_python_name(m.group(1)))
+
+    return names
+
+
 class PyprojectChecker(Checker):
     name = "pyproject"
     description = "Checks pyproject.toml [project] dependencies for == exact pinning"
@@ -289,13 +344,32 @@ class PyprojectChecker(Checker):
                     ))
 
             # Check for companion lock file with hash verification
-            if has_deps and not (files & _LOCK_FILES):
+            found_lock_files = files & _LOCK_FILES
+            if has_deps and not found_lock_files:
                 findings.append(Finding(
                     checker=self.name,
                     path=rel_path,
                     line=0,
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
                 ))
+            elif has_deps and found_lock_files:
+                # Cross-reference: check that every manifest dep appears in the lock file
+                lock_filename = sorted(found_lock_files)[0]
+                lock_names = _extract_lock_file_names(full_path, lock_filename)
+                if lock_names:
+                    for deps, label in dep_arrays:
+                        for dep in deps:
+                            raw_name = _extract_name_from_dep(dep)
+                            normalized = _normalize_python_name(raw_name)
+                            if normalized not in lock_names:
+                                findings.append(Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=0,
+                                    message="dependency '{}' not found in {}".format(
+                                        normalized, lock_filename
+                                    ),
+                                ))
 
         return findings
 

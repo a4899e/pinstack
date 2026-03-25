@@ -40,6 +40,74 @@ def _is_unpinned(version):
     return False
 
 
+def _extract_js_lock_names(full_path, lock_filename):
+    # type: (str, str) -> Set[str]
+    """Extract package names from a JS lock file."""
+    lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
+    names = set()  # type: Set[str]
+    try:
+        with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return names
+
+    if lock_filename == "package-lock.json":
+        try:
+            data = json.loads(content)
+        except (ValueError, TypeError):
+            return names
+        packages = data.get("packages", {})
+        for key in packages:
+            if not key:
+                continue  # skip root "" entry
+            # Strip node_modules/ prefix (possibly nested)
+            name = key
+            while name.startswith("node_modules/"):
+                name = name[len("node_modules/"):]
+            if name:
+                names.add(name)
+    elif lock_filename == "yarn.lock":
+        # Non-indented lines ending with : are package headers
+        # e.g. "express@4.18.2:" or "express@^4.18.2, express@>=4.0.0:"
+        for line in content.splitlines():
+            if not line or line[0] in (' ', '\t', '#'):
+                continue
+            if line.endswith(":"):
+                # First entry before comma; extract name before @version
+                entry = line.rstrip(":").split(",")[0].strip().strip('"')
+                # Package name is everything before the last @ (scoped pkgs have leading @)
+                at_pos = entry.rfind("@")
+                if at_pos > 0:
+                    names.add(entry[:at_pos])
+                else:
+                    names.add(entry)
+    elif lock_filename == "pnpm-lock.yaml":
+        # Package entries under packages: like /express@4.18.2: or /express/4.18.2:
+        in_packages = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped == "packages:":
+                in_packages = True
+                continue
+            if in_packages:
+                # End of packages section: non-indented line that isn't a package entry
+                if line and not line[0].isspace():
+                    in_packages = False
+                    continue
+                # Package entry lines start with / after stripping
+                if stripped.startswith("/"):
+                    entry = stripped.lstrip("/").rstrip(":")
+                    # Format: name@version or @scope/name@version
+                    # Find last @ that separates name from version
+                    at_pos = entry.rfind("@")
+                    if at_pos > 0:
+                        names.add(entry[:at_pos])
+                    else:
+                        names.add(entry)
+
+    return names
+
+
 class PackageJsonChecker(Checker):
     name = "package_json"
     description = "Checks package.json files for unpinned (non-exact) dependency versions"
@@ -86,12 +154,32 @@ class PackageJsonChecker(Checker):
                         ))
 
             # Check for companion lock file
-            if has_deps and not (files & _LOCK_FILES):
+            found_lock_files = files & _LOCK_FILES
+            if has_deps and not found_lock_files:
                 findings.append(Finding(
                     checker=self.name,
                     path=rel_path,
                     line=0,
                     message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
                 ))
+            elif has_deps and found_lock_files:
+                # Cross-reference: check that every manifest dep appears in the lock file
+                lock_filename = sorted(found_lock_files)[0]
+                lock_names = _extract_js_lock_names(full_path, lock_filename)
+                if lock_names:
+                    for section in _DEP_SECTIONS:
+                        deps = data.get(section)
+                        if not deps or not isinstance(deps, dict):
+                            continue
+                        for pkg in sorted(deps.keys()):
+                            if pkg not in lock_names:
+                                findings.append(Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=0,
+                                    message="dependency '{}' not found in {}".format(
+                                        pkg, lock_filename
+                                    ),
+                                ))
 
         return findings

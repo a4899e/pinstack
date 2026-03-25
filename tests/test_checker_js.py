@@ -312,3 +312,111 @@ class TestPackageJsonLockFileCheck:
             assert len(lock_findings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# package.json lock file cross-reference tests
+# ---------------------------------------------------------------------------
+
+_PACKAGE_JSON_TWO_DEPS = json.dumps({
+    "name": "my-app",
+    "version": "1.0.0",
+    "dependencies": {"express": "4.18.2", "lodash": "4.17.21"},
+})
+
+
+class TestPackageJsonLockFileCrossRef:
+    def test_dep_missing_from_package_lock(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "package-lock.json")
+            lock_data = {
+                "name": "my-app",
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "my-app", "version": "1.0.0"},
+                    "node_modules/express": {"version": "4.18.2", "integrity": "sha512-abc"},
+                }
+            }
+            with open(lock_path, "w") as fh:
+                json.dump(lock_data, fh)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "package-lock.json"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert len(cross_ref) == 1
+            assert "lodash" in cross_ref[0].message
+            assert "package-lock.json" in cross_ref[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_present_in_package_lock(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "package-lock.json")
+            lock_data = {
+                "name": "my-app",
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "my-app", "version": "1.0.0"},
+                    "node_modules/express": {"version": "4.18.2", "integrity": "sha512-abc"},
+                    "node_modules/lodash": {"version": "4.17.21", "integrity": "sha512-def"},
+                }
+            }
+            with open(lock_path, "w") as fh:
+                json.dump(lock_data, fh)
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "package-lock.json"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_missing_from_yarn_lock(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "yarn.lock")
+            with open(lock_path, "w") as fh:
+                fh.write(
+                    '# yarn lockfile v1\n'
+                    '\n'
+                    'express@4.18.2:\n'
+                    '  version "4.18.2"\n'
+                    '  integrity sha512-abc\n'
+                )
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "yarn.lock"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert len(cross_ref) == 1
+            assert "lodash" in cross_ref[0].message
+            assert "yarn.lock" in cross_ref[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_missing_from_pnpm_lock(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_package_json(tmpdir, _PACKAGE_JSON_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "pnpm-lock.yaml")
+            with open(lock_path, "w") as fh:
+                fh.write(
+                    'lockfileVersion: 5\n'
+                    '\n'
+                    'packages:\n'
+                    '  /express@4.18.2:\n'
+                    '    resolution: {integrity: sha512-abc}\n'
+                )
+            checker = PackageJsonChecker()
+            index = {tmpdir: {"package.json", "pnpm-lock.yaml"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert len(cross_ref) == 1
+            assert "lodash" in cross_ref[0].message
+            assert "pnpm-lock.yaml" in cross_ref[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

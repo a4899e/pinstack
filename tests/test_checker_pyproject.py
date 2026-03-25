@@ -411,3 +411,144 @@ class TestPyprojectLockFileCheck:
             assert len(lock_findings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Lock file cross-reference tests
+# ---------------------------------------------------------------------------
+
+_PYPROJECT_TWO_DEPS = (
+    '[project]\n'
+    'name = "myapp"\n'
+    'version = "1.0.0"\n'
+    'dependencies = [\n'
+    '    "flask==2.0",\n'
+    '    "requests==2.28.0",\n'
+    ']\n'
+)
+
+
+class TestPyprojectLockFileCrossRef:
+    def test_dep_missing_from_requirements_txt(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            req_path = os.path.join(tmpdir, "requirements.txt")
+            with open(req_path, "w") as fh:
+                fh.write("requests==2.28.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert len(cross_ref) == 1
+            assert "flask" in cross_ref[0].message
+            assert "requirements.txt" in cross_ref[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_present_in_requirements_txt(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            req_path = os.path.join(tmpdir, "requirements.txt")
+            with open(req_path, "w") as fh:
+                fh.write("flask==2.0\nrequests==2.28.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_name_normalization(self):
+        """Capital letters in pyproject.toml should match lowercase in lock file."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_content = (
+                '[project]\n'
+                'name = "myapp"\n'
+                'dependencies = [\n'
+                '    "Flask==2.0",\n'
+                ']\n'
+            )
+            _make_pyproject(tmpdir, toml_content)
+            req_path = os.path.join(tmpdir, "requirements.txt")
+            with open(req_path, "w") as fh:
+                fh.write("flask==2.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dep_name_dash_underscore(self):
+        """Dashes and underscores should be treated as equivalent (PEP 503)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_content = (
+                '[project]\n'
+                'name = "myapp"\n'
+                'dependencies = [\n'
+                '    "my-package==1.0",\n'
+                ']\n'
+            )
+            _make_pyproject(tmpdir, toml_content)
+            req_path = os.path.join(tmpdir, "requirements.txt")
+            with open(req_path, "w") as fh:
+                fh.write("my_package==1.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_lock_cross_ref(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "poetry.lock")
+            with open(lock_path, "w") as fh:
+                fh.write(
+                    '[[package]]\n'
+                    'name = "requests"\n'
+                    'version = "2.28.0"\n'
+                    '\n'
+                    '[[package]]\n'
+                    'name = "flask"\n'
+                    'version = "2.0"\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_uv_lock_cross_ref(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            lock_path = os.path.join(tmpdir, "uv.lock")
+            with open(lock_path, "w") as fh:
+                fh.write(
+                    '[[package]]\n'
+                    'name = "requests"\n'
+                    'version = "2.28.0"\n'
+                    '\n'
+                    '[[package]]\n'
+                    'name = "flask"\n'
+                    'version = "2.0"\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "uv.lock"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "not found in" in f.message]
+            assert cross_ref == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
