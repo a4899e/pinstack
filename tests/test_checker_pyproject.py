@@ -402,15 +402,15 @@ class TestPyprojectLockFileCheck:
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_lock_file_warning_is_warning_severity(self):
+    def test_lock_file_error_is_error_severity(self):
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml"}}
             findings = checker.check(index, tmpdir)
-            lock_warnings = [f for f in findings if "lock file" in f.message]
-            assert len(lock_warnings) == 1
-            assert lock_warnings[0].severity == Severity.WARNING
+            lock_errors = [f for f in findings if "lock file" in f.message]
+            assert len(lock_errors) == 1
+            assert lock_errors[0].severity == Severity.ERROR
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

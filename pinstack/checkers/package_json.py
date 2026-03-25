@@ -92,7 +92,7 @@ class PackageJsonChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.WARNING,
+                    severity=Severity.ERROR,
                     message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
                 ))
 

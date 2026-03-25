@@ -92,9 +92,9 @@ class TestPackageJsonBad:
         assert any("react" in m for m in msgs), "react ^18.0.0 should be flagged"
 
     def test_all_findings_are_errors(self):
-        # The lock-file companion warning is also expected; only check pinning findings
+        # 4 pinning errors + 1 missing lock file error = 5
         error_findings = [f for f in self.findings if f.severity == Severity.ERROR]
-        assert len(error_findings) == 4
+        assert len(error_findings) == 5
         for f in error_findings:
             assert f.severity == Severity.ERROR
 
@@ -314,15 +314,15 @@ class TestPackageJsonLockFileCheck:
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_lock_file_warning_is_warning_severity(self):
+    def test_lock_file_error_is_error_severity(self):
         tmpdir = tempfile.mkdtemp()
         try:
             _make_package_json(tmpdir, _PACKAGE_JSON_WITH_DEPS)
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json"}}
             findings = checker.check(index, tmpdir)
-            lock_warnings = [f for f in findings if "lock file" in f.message]
-            assert len(lock_warnings) == 1
-            assert lock_warnings[0].severity == Severity.WARNING
+            lock_errors = [f for f in findings if "lock file" in f.message]
+            assert len(lock_errors) == 1
+            assert lock_errors[0].severity == Severity.ERROR
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)

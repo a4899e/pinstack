@@ -295,7 +295,7 @@ class PyprojectChecker(Checker):
                     checker=self.name,
                     path=rel_path,
                     line=0,
-                    severity=Severity.WARNING,
+                    severity=Severity.ERROR,
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
                 ))
 
