@@ -4,6 +4,9 @@
 #
 #    pip-compile --extra=dev --generate-hashes --output-file=requirements.txt pyproject.toml
 #
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+    # via jsonschema, referencing
 iniconfig==2.3.0 \
     --hash=sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730 \
     --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
@@ -12,6 +15,18 @@ invoke==2.2.1 \
     --hash=sha256:2413bc441b376e5cd3f55bb5d364f973ad8bdd7bf87e53c79de3c11bf3feecc8 \
     --hash=sha256:515bf49b4a48932b79b024590348da22f39c4942dff991ad1fb8b8baea1be707
     # via pinstack (pyproject.toml)
+jsonschema==4.26.0 \
+    --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+    # via pinstack (pyproject.toml)
+jsonschema-specifications==2025.9.1 \
+    --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+    # via jsonschema
+referencing==0.37.0 \
+    --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+    # via jsonschema, jsonschema-specifications
+rpds-py==0.30.0 \
+    --hash=sha256:e7536cd91353c5273434b4e003cbda89034d67e7710eab8761fd918ec6c69cf8
+    # via referencing
 nodeenv==1.10.0 \
     --hash=sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827 \
     --hash=sha256:996c191ad80897d076bdfba80a41994c2b47c68e224c542b48feba42ba00f8bb

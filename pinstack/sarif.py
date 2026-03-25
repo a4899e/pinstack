@@ -10,6 +10,13 @@ if TYPE_CHECKING:
 
 import pinstack
 
+_NIST_INTEGRITY_NOTE = (
+    "This project pins dependencies by version but does not verify artifact "
+    "integrity. NIST SP 800-218 (SSDF), Practice PS.2 recommends verifying "
+    "software releases using cryptographic hashes to ensure they have not "
+    "been tampered with."
+)
+
 
 def format_sarif(findings: list[Finding]) -> str:
     rules: dict = {}
@@ -23,10 +30,14 @@ def format_sarif(findings: list[Finding]) -> str:
                 "shortDescription": {"text": rule_id},
             }
 
+        message_text = f.message
+        if f.integrity:
+            message_text = "{}\n\n{}".format(f.message, _NIST_INTEGRITY_NOTE)
+
         result = {
             "ruleId": rule_id,
             "level": "error",
-            "message": {"text": f.message},
+            "message": {"text": message_text},
             "locations": [
                 {
                     "physicalLocation": {
@@ -50,6 +61,7 @@ def format_sarif(findings: list[Finding]) -> str:
                     "driver": {
                         "name": "pinstack",
                         "version": pinstack.__version__,
+                        "informationUri": "https://github.com/a4899e/pinstack",
                         "rules": list(rules.values()),
                     }
                 },

@@ -85,6 +85,7 @@ class YarnLockChecker(Checker):
                             message=(
                                 "'{}' is missing an integrity hash in yarn.lock".format(header)
                             ),
+                            integrity=True,
                         ))
 
         return findings

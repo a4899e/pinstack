@@ -40,6 +40,7 @@ class HelmChecker(Checker):
                         path=chart_yaml_rel,
                         line=0,
                         message="Chart.yaml declares dependencies but Chart.lock is missing; run 'helm dependency update'",
+                        integrity=True,
                     ))
 
             # Check Chart.lock for missing digests and cross-reference deps
@@ -63,6 +64,7 @@ class HelmChecker(Checker):
                                 "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                                 ", ".join(sorted(missing)),
                             ),
+                            integrity=True,
                         ))
 
         return findings
@@ -136,6 +138,7 @@ class HelmChecker(Checker):
                         path=rel_path,
                         line=dep_line,
                         message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
+                        integrity=True,
                     ))
                 dep_name = stripped[len("- name:"):].strip()
                 dep_line = lineno
@@ -152,6 +155,7 @@ class HelmChecker(Checker):
                 path=rel_path,
                 line=dep_line,
                 message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
+                integrity=True,
             ))
 
         return findings

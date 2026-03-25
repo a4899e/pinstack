@@ -340,6 +340,7 @@ class PyprojectChecker(Checker):
                     path=rel_path,
                     line=0,
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
+                    integrity=True,
                 ))
             elif has_deps and found_lock_files:
                 # Cross-reference: check that every manifest dep appears in the lock file
@@ -363,6 +364,7 @@ class PyprojectChecker(Checker):
                                 "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                                 ", ".join(sorted(missing)),
                             ),
+                            integrity=True,
                         ))
 
         return findings

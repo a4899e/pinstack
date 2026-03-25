@@ -81,6 +81,7 @@ class GemfileChecker(Checker):
                     path=rel_path,
                     line=0,
                     message="Gemfile has no corresponding Gemfile.lock; run 'bundle install'",
+                    integrity=True,
                 ))
                 continue
 
@@ -103,6 +104,7 @@ class GemfileChecker(Checker):
                             "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                             ", ".join(sorted(missing)),
                         ),
+                        integrity=True,
                     ))
 
         return findings

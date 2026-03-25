@@ -95,6 +95,7 @@ class CargoChecker(Checker):
                         path=rp,
                         line=pkg_line,
                         message="package '{}' from registry is missing checksum".format(pkg_name),
+                        integrity=True,
                     ))
 
             for lineno, raw_line in enumerate(lines, start=1):
@@ -138,6 +139,7 @@ class CargoChecker(Checker):
                             "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                             ", ".join(sorted(missing)),
                         ),
+                        integrity=True,
                     ))
 
         return findings

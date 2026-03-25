@@ -121,6 +121,7 @@ class GradleChecker(Checker):
                     path=rel_path,
                     line=0,
                     message="{} has no gradle.lockfile; run 'gradle dependencies --write-locks'".format(first_build),
+                    integrity=True,
                 ))
 
             # Parse lockfile coords once (if present) for cross-referencing
@@ -184,6 +185,7 @@ class GradleChecker(Checker):
                         "{} dependency".format(len(missing_from_lock)) if len(missing_from_lock) == 1 else "{} dependencies".format(len(missing_from_lock)),
                         ", ".join(sorted(missing_from_lock)),
                     ),
+                    integrity=True,
                 ))
 
         return findings

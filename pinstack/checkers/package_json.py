@@ -157,6 +157,7 @@ class PackageJsonChecker(Checker):
                     path=rel_path,
                     line=0,
                     message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
+                    integrity=True,
                 ))
             elif has_deps and found_lock_files:
                 # Cross-reference: check that every manifest dep appears in the lock file
@@ -181,6 +182,7 @@ class PackageJsonChecker(Checker):
                                 "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                                 ", ".join(sorted(missing)),
                             ),
+                            integrity=True,
                         ))
 
         return findings

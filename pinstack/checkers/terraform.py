@@ -49,6 +49,7 @@ class TerraformChecker(Checker):
                                 path=rel_path,
                                 line=provider_line,
                                 message="provider '{}' is missing h1: hash in lock file".format(provider_name),
+                                integrity=True,
                             ))
                         in_provider = True
                         in_hashes = False
@@ -74,6 +75,7 @@ class TerraformChecker(Checker):
                                 path=rel_path,
                                 line=provider_line,
                                 message="provider '{}' is missing h1: hash in lock file".format(provider_name),
+                                integrity=True,
                             ))
                         in_provider = False
                         provider_name = None
@@ -98,6 +100,7 @@ class TerraformChecker(Checker):
                         path=rel_path,
                         line=provider_line,
                         message="provider '{}' is missing h1: hash in lock file".format(provider_name),
+                        integrity=True,
                     ))
 
         return findings

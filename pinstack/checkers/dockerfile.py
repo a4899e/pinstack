@@ -63,6 +63,7 @@ class DockerfileChecker(Checker):
                             path=rel_path,
                             line=lineno,
                             message="FROM '{}' is not pinned with @sha256: digest".format(image),
+                            integrity=True,
                         ))
 
         return findings

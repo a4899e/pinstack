@@ -52,6 +52,7 @@ class ComposeChecker(Checker):
                             path=rel_path,
                             line=lineno,
                             message="image '{}' is not pinned with @sha256: digest".format(image),
+                            integrity=True,
                         ))
 
         return findings

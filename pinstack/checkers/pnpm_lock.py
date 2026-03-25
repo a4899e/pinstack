@@ -104,6 +104,7 @@ class PnpmLockChecker(Checker):
                             message=(
                                 "'{}' is missing an integrity hash in pnpm-lock.yaml".format(pkg_key)
                             ),
+                            integrity=True,
                         ))
 
         return findings

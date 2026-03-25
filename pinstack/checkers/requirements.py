@@ -146,6 +146,7 @@ class RequirementsChecker(Checker):
                             path=rel_path,
                             line=start_lineno,
                             message="'{}' is pinned with == but missing --hash=; add integrity hash".format(pkg_name),
+                            integrity=True,
                         ))
 
         return findings

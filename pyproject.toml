@@ -30,15 +30,15 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.0.2", "ruff==0.15.7", "pyright==1.1.408", "invoke==2.2.1"]
+dev = ["pytest==9.0.2", "ruff==0.15.7", "pyright==1.1.408", "invoke==2.2.1", "jsonschema==4.26.0"]
 
 [project.scripts]
 pinstack = "pinstack.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/smthmlk/pinstack"
-Repository = "https://github.com/smthmlk/pinstack"
-"Bug Tracker" = "https://github.com/smthmlk/pinstack/issues"
+Homepage = "https://github.com/a4899e/pinstack"
+Repository = "https://github.com/a4899e/pinstack"
+"Bug Tracker" = "https://github.com/a4899e/pinstack/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

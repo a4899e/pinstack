@@ -75,6 +75,7 @@ class GitHubActionsChecker(Checker):
                             path=rel_path,
                             line=lineno,
                             message="action '{}' has no @ ref; pin to a full-length SHA".format(ref),
+                            integrity=True,
                         ))
                         continue
 
@@ -87,6 +88,7 @@ class GitHubActionsChecker(Checker):
                             message="action '{}' is not pinned to a full-length SHA (got '{}')".format(
                                 action_part, pin
                             ),
+                            integrity=True,
                         ))
 
         return findings

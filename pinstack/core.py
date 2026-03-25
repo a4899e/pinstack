@@ -26,6 +26,7 @@ class Finding:
     path: str       # relative path
     line: int       # 1-based, 0 if N/A
     message: str
+    integrity: bool = False  # True when finding is about missing hash/checksum/integrity
 
 
 class Checker:

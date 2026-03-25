@@ -249,7 +249,7 @@ pinstack .
 **Without pip (clone and run directly):**
 
 ```
-git clone https://github.com/smthmlk/pinstack.git /tmp/pinstack
+git clone https://github.com/a4899e/pinstack.git /tmp/pinstack
 python3 /tmp/pinstack/pinstack .
 ```
 
@@ -276,7 +276,7 @@ pinstack . --exclude-dir vendor,third_party,checkouts
 
 ## Contributing
 
-1. Fork the repository at https://github.com/smthmlk/pinstack
+1. Fork the repository at https://github.com/a4899e/pinstack
 2. Create a branch from `develop` (not `main`)
 3. Add tests for any new checker or behaviour
 4. Open a pull request against `develop`

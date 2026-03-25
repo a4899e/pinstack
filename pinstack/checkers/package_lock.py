@@ -55,6 +55,7 @@ class PackageLockChecker(Checker):
                             message=(
                                 "'{}' is missing an integrity hash in package-lock.json".format(pkg_key)
                             ),
+                            integrity=True,
                         ))
 
         return findings

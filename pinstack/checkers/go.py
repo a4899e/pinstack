@@ -88,6 +88,7 @@ class GoChecker(Checker):
                     path=rel_path,
                     line=0,
                     message="go.mod has no corresponding go.sum; run 'go mod tidy'",
+                    integrity=True,
                 ))
                 continue
 
@@ -119,6 +120,7 @@ class GoChecker(Checker):
                         path=rel_sum,
                         line=lineno,
                         message="go.sum entry '{}' is missing h1: hash".format(parts[0]),
+                        integrity=True,
                     ))
 
             # Cross-reference: every go.mod dep must appear in go.sum
@@ -138,6 +140,7 @@ class GoChecker(Checker):
                         "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                         ", ".join(sorted(missing)),
                     ),
+                    integrity=True,
                 ))
 
         return findings

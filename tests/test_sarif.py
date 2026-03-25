@@ -2,10 +2,116 @@
 
 import json
 
-
+import jsonschema
 import pinstack
 from pinstack.core import Finding
 from pinstack.sarif import format_sarif
+
+
+# ---------------------------------------------------------------------------
+# Minimal SARIF 2.1.0 structural schema for validation
+# ---------------------------------------------------------------------------
+
+SARIF_SCHEMA = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": ["$schema", "version", "runs"],
+    "properties": {
+        "$schema": {"type": "string"},
+        "version": {"type": "string", "const": "2.1.0"},
+        "runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["tool", "results"],
+                "properties": {
+                    "tool": {
+                        "type": "object",
+                        "required": ["driver"],
+                        "properties": {
+                            "driver": {
+                                "type": "object",
+                                "required": ["name", "version", "rules"],
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "version": {"type": "string"},
+                                    "informationUri": {"type": "string", "format": "uri"},
+                                    "rules": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "required": ["id", "shortDescription"],
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "shortDescription": {
+                                                    "type": "object",
+                                                    "required": ["text"],
+                                                    "properties": {"text": {"type": "string"}},
+                                                },
+                                            },
+                                        }
+                                    },
+                                },
+                            }
+                        },
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["ruleId", "level", "message", "locations"],
+                            "properties": {
+                                "ruleId": {"type": "string"},
+                                "level": {
+                                    "type": "string",
+                                    "enum": ["none", "note", "warning", "error"],
+                                },
+                                "message": {
+                                    "type": "object",
+                                    "required": ["text"],
+                                    "properties": {"text": {"type": "string"}},
+                                },
+                                "locations": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["physicalLocation"],
+                                        "properties": {
+                                            "physicalLocation": {
+                                                "type": "object",
+                                                "required": ["artifactLocation"],
+                                                "properties": {
+                                                    "artifactLocation": {
+                                                        "type": "object",
+                                                        "required": ["uri"],
+                                                        "properties": {
+                                                            "uri": {"type": "string"}
+                                                        },
+                                                    },
+                                                    "region": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "startLine": {
+                                                                "type": "integer",
+                                                                "minimum": 1,
+                                                            }
+                                                        },
+                                                    },
+                                                },
+                                            }
+                                        },
+                                    },
+                                },
+                            },
+                        }
+                    },
+                },
+            },
+        },
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -258,3 +364,97 @@ class TestMultipleCheckersMultipleRules:
         assert results[0]["ruleId"] == "alpha"
         assert results[1]["ruleId"] == "beta"
         assert results[2]["ruleId"] == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# test_sarif_schema_validation
+# ---------------------------------------------------------------------------
+
+def _validate(findings):
+    # type: (list) -> dict
+    """Parse SARIF output and validate against the structural schema."""
+    output = format_sarif(findings)
+    data = json.loads(output)
+    jsonschema.validate(data, SARIF_SCHEMA)
+    return data
+
+
+def _integrity_finding(**kwargs):
+    # type: (...) -> Finding
+    defaults = dict(checker="package_lock", path="package-lock.json", line=1,
+                    message="'lodash' is missing an integrity hash in package-lock.json",
+                    integrity=True)
+    defaults.update(kwargs)
+    return Finding(**defaults)
+
+
+class TestSarifSchemaValidation:
+    """Validate SARIF output against structural schema requirements."""
+
+    def test_empty_findings_validates(self):
+        _validate([])
+
+    def test_single_finding_validates(self):
+        _validate([_finding()])
+
+    def test_multiple_findings_validates(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="dockerfile", line=3),
+            _finding(checker="requirements", line=9),
+        ]
+        _validate(findings)
+
+    def test_integrity_finding_validates(self):
+        _validate([_integrity_finding()])
+
+    def test_mixed_findings_validates(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _integrity_finding(checker="package_lock", line=5),
+            _finding(checker="pyproject", line=10),
+            _integrity_finding(checker="yarn_lock", line=20),
+        ]
+        _validate(findings)
+
+    def test_startLine_is_positive_integer(self):
+        data = _validate([_finding(line=0)])
+        loc = data["runs"][0]["results"][0]["locations"][0]
+        start_line = loc["physicalLocation"]["region"]["startLine"]
+        assert isinstance(start_line, int)
+        assert start_line >= 1
+
+
+# ---------------------------------------------------------------------------
+# test_integrity_nist_message
+# ---------------------------------------------------------------------------
+
+class TestIntegrityNistMessage:
+    """Verify NIST reference is appended to integrity findings and not to others."""
+
+    def test_integrity_finding_has_nist_reference(self):
+        data = _parse([_integrity_finding()])
+        message_text = data["runs"][0]["results"][0]["message"]["text"]
+        assert "NIST" in message_text
+
+    def test_integrity_finding_nist_text_contains_sp800(self):
+        data = _parse([_integrity_finding()])
+        message_text = data["runs"][0]["results"][0]["message"]["text"]
+        assert "SP 800-218" in message_text
+
+    def test_non_integrity_finding_no_nist(self):
+        data = _parse([_finding()])
+        message_text = data["runs"][0]["results"][0]["message"]["text"]
+        assert "NIST" not in message_text
+
+    def test_integrity_message_starts_with_original(self):
+        original_msg = "'lodash' is missing an integrity hash in package-lock.json"
+        data = _parse([_integrity_finding(message=original_msg)])
+        message_text = data["runs"][0]["results"][0]["message"]["text"]
+        assert message_text.startswith(original_msg)
+
+    def test_non_integrity_message_unchanged(self):
+        msg = "'foo' is not pinned with ==; use package==version"
+        data = _parse([_finding(message=msg)])
+        message_text = data["runs"][0]["results"][0]["message"]["text"]
+        assert message_text == msg
