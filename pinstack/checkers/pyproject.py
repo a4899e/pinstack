@@ -234,48 +234,70 @@ def _check_dep_specifier(dep):
     return True, "'{}' uses '{}' instead of '=='; use exact pinning".format(dep.split(";")[0].strip(), operator)
 
 
+# Lock files that provide hash verification for pyproject.toml dependencies
+_LOCK_FILES = frozenset([
+    "requirements.txt",  # pip-compile output with --generate-hashes
+    "poetry.lock",
+    "pdm.lock",
+    "uv.lock",
+])
+
+
 class PyprojectChecker(Checker):
     name = "pyproject"
     description = "Checks pyproject.toml [project] dependencies for == exact pinning"
-    patterns = ["pyproject.toml"]  # type: List[str]
+    patterns = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]  # type: List[str]
 
     def check(self, index, root):
         # type: (FileIndex, str) -> List[Finding]
         findings = []  # type: List[Finding]
 
         for dir_path in sorted(index.keys()):
-            for fname in sorted(index[dir_path]):
-                if not fnmatch.fnmatch(fname, "pyproject.toml"):
-                    continue
+            files = index[dir_path]
+            if "pyproject.toml" not in files:
+                continue
 
-                full_path = os.path.join(dir_path, fname)
-                rel_path = os.path.relpath(full_path, root)
+            full_path = os.path.join(dir_path, "pyproject.toml")
+            rel_path = os.path.relpath(full_path, root)
 
-                try:
-                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                        content = fh.read()
-                        raw_lines = content.splitlines()
-                except OSError:
-                    continue
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    content = fh.read()
+                    raw_lines = content.splitlines()
+            except OSError:
+                continue
 
-                dep_arrays = extract_dependency_arrays(content)
+            dep_arrays = extract_dependency_arrays(content)
 
-                for deps, label in dep_arrays:
-                    for dep in deps:
-                        is_bad, msg = _check_dep_specifier(dep)
-                        if not is_bad:
-                            continue
+            # Check each dep for == pinning
+            has_deps = False
+            for deps, label in dep_arrays:
+                if deps:
+                    has_deps = True
+                for dep in deps:
+                    is_bad, msg = _check_dep_specifier(dep)
+                    if not is_bad:
+                        continue
 
-                        # Find which line this dependency appears on (1-based)
-                        lineno = _find_dep_line(raw_lines, dep)
+                    lineno = _find_dep_line(raw_lines, dep)
 
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            severity=Severity.ERROR,
-                            message=msg,
-                        ))
+                    findings.append(Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=lineno,
+                        severity=Severity.ERROR,
+                        message=msg,
+                    ))
+
+            # Check for companion lock file with hash verification
+            if has_deps and not (files & _LOCK_FILES):
+                findings.append(Finding(
+                    checker=self.name,
+                    path=rel_path,
+                    line=0,
+                    severity=Severity.WARNING,
+                    message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
+                ))
 
         return findings
 
