@@ -1,0 +1,10 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation 'org.springframework:spring-core:5.+'
+    api 'com.google.guava:guava:latest.release'
+    testImplementation 'org.junit.jupiter:junit-jupiter:latest.integration'
+    runtimeOnly 'org.apache.commons:commons-lang3:3.+'
+}

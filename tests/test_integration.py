@@ -429,7 +429,7 @@ class TestMaxDepthLimitsScan:
 # ---------------------------------------------------------------------------
 
 class TestListCheckers:
-    # The 14 canonical checker names as registered
+    # The 16 canonical checker names as registered
     EXPECTED_NAMES = {
         "cargo",
         "compose",
@@ -437,7 +437,9 @@ class TestListCheckers:
         "gemfile",
         "github_actions",
         "go",
+        "gradle",
         "helm",
+        "maven",
         "package_json",
         "package_lock",
         "pnpm_lock",
@@ -451,7 +453,7 @@ class TestListCheckers:
         rc, out, err = run_pinstack("--list-checkers")
         assert rc == 0
 
-    def test_all_14_checkers_listed(self):
+    def test_all_16_checkers_listed(self):
         rc, out, err = run_pinstack("--list-checkers")
         # Each line starts with the checker name followed by whitespace
         listed = set()
