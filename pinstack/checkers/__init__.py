@@ -8,6 +8,12 @@ from pinstack.checkers.package_json import PackageJsonChecker
 from pinstack.checkers.package_lock import PackageLockChecker
 from pinstack.checkers.yarn_lock import YarnLockChecker
 from pinstack.checkers.pnpm_lock import PnpmLockChecker
+from pinstack.checkers.dockerfile import DockerfileChecker
+from pinstack.checkers.compose import ComposeChecker
+from pinstack.checkers.github_actions import GitHubActionsChecker
+from pinstack.checkers.go import GoChecker
+from pinstack.checkers.cargo import CargoChecker
+from pinstack.checkers.gemfile import GemfileChecker
 
 ALL_CHECKERS = [  # type: List[Type[Checker]]
     RequirementsChecker,
@@ -16,4 +22,10 @@ ALL_CHECKERS = [  # type: List[Type[Checker]]
     PackageLockChecker,
     YarnLockChecker,
     PnpmLockChecker,
+    DockerfileChecker,
+    ComposeChecker,
+    GitHubActionsChecker,
+    GoChecker,
+    CargoChecker,
+    GemfileChecker,
 ]

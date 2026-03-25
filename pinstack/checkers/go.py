@@ -1,0 +1,70 @@
+"""Go checker: enforces go.sum exists alongside go.mod and checks h1: hashes."""
+
+import os
+from typing import Dict, List, Set
+
+from pinstack.core import Checker, Finding, Severity
+
+FileIndex = Dict[str, Set[str]]
+
+
+class GoChecker(Checker):
+    name = "go"
+    description = "Checks go.mod/go.sum pairs: go.sum must exist and contain h1: hashes"
+    patterns = ["go.mod", "go.sum"]  # type: List[str]
+
+    def check(self, index, root):
+        # type: (FileIndex, str) -> List[Finding]
+        findings = []  # type: List[Finding]
+
+        for dir_path in sorted(index.keys()):
+            files = index[dir_path]
+            has_mod = "go.mod" in files
+            has_sum = "go.sum" in files
+
+            if not has_mod:
+                # Only go.sum present — no action needed
+                continue
+
+            if not has_sum:
+                rel_path = os.path.relpath(os.path.join(dir_path, "go.mod"), root)
+                findings.append(Finding(
+                    checker=self.name,
+                    path=rel_path,
+                    line=0,
+                    severity=Severity.ERROR,
+                    message="go.mod has no corresponding go.sum; run 'go mod tidy'",
+                ))
+                continue
+
+            # Both exist — check go.sum for h1: hashes
+            sum_path = os.path.join(dir_path, "go.sum")
+            rel_sum = os.path.relpath(sum_path, root)
+
+            try:
+                with open(sum_path, "r", encoding="utf-8", errors="replace") as fh:
+                    lines = fh.readlines()
+            except OSError:
+                continue
+
+            for lineno, raw_line in enumerate(lines, start=1):
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                parts = line.split()
+                # go.sum format: <module> <version> <hash>
+                if len(parts) < 3:
+                    continue
+
+                hash_field = parts[2]
+                if not hash_field.startswith("h1:"):
+                    findings.append(Finding(
+                        checker=self.name,
+                        path=rel_sum,
+                        line=lineno,
+                        severity=Severity.WARNING,
+                        message="go.sum entry '{}' is missing h1: hash".format(parts[0]),
+                    ))
+
+        return findings
