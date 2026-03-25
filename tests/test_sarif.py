@@ -1,0 +1,273 @@
+"""Tests for pinstack/sarif.py — SARIF 2.1.0 output builder."""
+
+import json
+
+import pytest
+
+import pinstack
+from pinstack.core import Finding, Severity
+from pinstack.sarif import format_sarif
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _finding(checker="requirements", path="req.txt", line=1,
+             severity=Severity.ERROR, message="missing pin"):
+    # type: (...) -> Finding
+    return Finding(
+        checker=checker,
+        path=path,
+        line=line,
+        severity=severity,
+        message=message,
+    )
+
+
+def _parse(findings):
+    # type: (list) -> dict
+    return json.loads(format_sarif(findings))
+
+
+# ---------------------------------------------------------------------------
+# test_empty_findings
+# ---------------------------------------------------------------------------
+
+class TestEmptyFindings:
+    def test_empty_findings(self):
+        data = _parse([])
+        run = data["runs"][0]
+        assert run["results"] == []
+        assert run["tool"]["driver"]["rules"] == []
+
+
+# ---------------------------------------------------------------------------
+# test_single_finding
+# ---------------------------------------------------------------------------
+
+class TestSingleFinding:
+    def test_rule_id(self):
+        data = _parse([_finding(checker="requirements")])
+        result = data["runs"][0]["results"][0]
+        assert result["ruleId"] == "requirements"
+
+    def test_level_error(self):
+        data = _parse([_finding(severity=Severity.ERROR)])
+        result = data["runs"][0]["results"][0]
+        assert result["level"] == "error"
+
+    def test_message_text(self):
+        data = _parse([_finding(message="'foo' is not pinned")])
+        result = data["runs"][0]["results"][0]
+        assert result["message"]["text"] == "'foo' is not pinned"
+
+    def test_location_uri(self):
+        data = _parse([_finding(path="subdir/requirements.txt")])
+        loc = data["runs"][0]["results"][0]["locations"][0]
+        assert loc["physicalLocation"]["artifactLocation"]["uri"] == "subdir/requirements.txt"
+
+    def test_location_start_line(self):
+        data = _parse([_finding(line=7)])
+        loc = data["runs"][0]["results"][0]["locations"][0]
+        assert loc["physicalLocation"]["region"]["startLine"] == 7
+
+    def test_one_rule_created(self):
+        data = _parse([_finding(checker="requirements")])
+        rules = data["runs"][0]["tool"]["driver"]["rules"]
+        assert len(rules) == 1
+        assert rules[0]["id"] == "requirements"
+
+
+# ---------------------------------------------------------------------------
+# test_multiple_findings_same_checker
+# ---------------------------------------------------------------------------
+
+class TestMultipleFindingsSameChecker:
+    def test_only_one_rule(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="requirements", line=5),
+            _finding(checker="requirements", line=10),
+        ]
+        data = _parse(findings)
+        rules = data["runs"][0]["tool"]["driver"]["rules"]
+        assert len(rules) == 1
+
+    def test_multiple_results(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="requirements", line=5),
+        ]
+        data = _parse(findings)
+        results = data["runs"][0]["results"]
+        assert len(results) == 2
+
+    def test_rule_id_matches(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="requirements", line=5),
+        ]
+        data = _parse(findings)
+        for result in data["runs"][0]["results"]:
+            assert result["ruleId"] == "requirements"
+
+
+# ---------------------------------------------------------------------------
+# test_error_level
+# ---------------------------------------------------------------------------
+
+class TestErrorLevel:
+    def test_error_level(self):
+        data = _parse([_finding(severity=Severity.ERROR)])
+        result = data["runs"][0]["results"][0]
+        assert result["level"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# test_warning_level
+# ---------------------------------------------------------------------------
+
+class TestWarningLevel:
+    def test_warning_level(self):
+        data = _parse([_finding(severity=Severity.WARNING)])
+        result = data["runs"][0]["results"][0]
+        assert result["level"] == "warning"
+
+
+# ---------------------------------------------------------------------------
+# test_line_zero_clamped
+# ---------------------------------------------------------------------------
+
+class TestLineZeroClamped:
+    def test_line_zero_becomes_one(self):
+        data = _parse([_finding(line=0)])
+        loc = data["runs"][0]["results"][0]["locations"][0]
+        assert loc["physicalLocation"]["region"]["startLine"] == 1
+
+    def test_line_positive_unchanged(self):
+        data = _parse([_finding(line=42)])
+        loc = data["runs"][0]["results"][0]["locations"][0]
+        assert loc["physicalLocation"]["region"]["startLine"] == 42
+
+
+# ---------------------------------------------------------------------------
+# test_schema_and_version
+# ---------------------------------------------------------------------------
+
+class TestSchemaAndVersion:
+    def test_schema_url_present(self):
+        data = _parse([])
+        assert "$schema" in data
+
+    def test_schema_url_contains_sarif(self):
+        data = _parse([])
+        assert "sarif" in data["$schema"].lower()
+
+    def test_schema_url_contains_2_1_0(self):
+        data = _parse([])
+        assert "2.1.0" in data["$schema"]
+
+    def test_version_field(self):
+        data = _parse([])
+        assert data["version"] == "2.1.0"
+
+
+# ---------------------------------------------------------------------------
+# test_tool_name_and_version
+# ---------------------------------------------------------------------------
+
+class TestToolNameAndVersion:
+    def test_tool_name_pinstack(self):
+        data = _parse([])
+        driver = data["runs"][0]["tool"]["driver"]
+        assert driver["name"] == "pinstack"
+
+    def test_tool_version_matches(self):
+        data = _parse([])
+        driver = data["runs"][0]["tool"]["driver"]
+        assert driver["version"] == pinstack.__version__
+
+    def test_tool_version_nonempty(self):
+        data = _parse([])
+        driver = data["runs"][0]["tool"]["driver"]
+        assert driver["version"]
+
+
+# ---------------------------------------------------------------------------
+# test_valid_json
+# ---------------------------------------------------------------------------
+
+class TestValidJson:
+    def test_empty_is_valid_json(self):
+        output = format_sarif([])
+        json.loads(output)  # must not raise
+
+    def test_single_finding_is_valid_json(self):
+        output = format_sarif([_finding()])
+        json.loads(output)  # must not raise
+
+    def test_mixed_findings_is_valid_json(self):
+        findings = [
+            _finding(checker="requirements", severity=Severity.ERROR, line=1),
+            _finding(checker="dockerfile", severity=Severity.WARNING, line=3),
+            _finding(checker="requirements", severity=Severity.WARNING, line=9),
+        ]
+        output = format_sarif(findings)
+        json.loads(output)  # must not raise
+
+    def test_output_is_string(self):
+        output = format_sarif([])
+        assert isinstance(output, str)
+
+
+# ---------------------------------------------------------------------------
+# test_multiple_checkers_multiple_rules
+# ---------------------------------------------------------------------------
+
+class TestMultipleCheckersMultipleRules:
+    def test_two_checkers_two_rules(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="dockerfile", line=2),
+        ]
+        data = _parse(findings)
+        rules = data["runs"][0]["tool"]["driver"]["rules"]
+        rule_ids = {r["id"] for r in rules}
+        assert rule_ids == {"requirements", "dockerfile"}
+
+    def test_three_checkers_three_rules(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="dockerfile", line=2),
+            _finding(checker="pyproject", line=3),
+            _finding(checker="requirements", line=9),  # duplicate checker
+        ]
+        data = _parse(findings)
+        rules = data["runs"][0]["tool"]["driver"]["rules"]
+        assert len(rules) == 3
+
+    def test_results_count_matches_findings(self):
+        findings = [
+            _finding(checker="requirements", line=1),
+            _finding(checker="dockerfile", line=2),
+            _finding(checker="pyproject", line=3),
+        ]
+        data = _parse(findings)
+        assert len(data["runs"][0]["results"]) == 3
+
+    def test_runs_list_has_one_run(self):
+        data = _parse([_finding(), _finding(checker="dockerfile")])
+        assert len(data["runs"]) == 1
+
+    def test_each_result_has_correct_rule_id(self):
+        findings = [
+            _finding(checker="alpha", line=1),
+            _finding(checker="beta", line=2),
+            _finding(checker="alpha", line=5),
+        ]
+        data = _parse(findings)
+        results = data["runs"][0]["results"]
+        assert results[0]["ruleId"] == "alpha"
+        assert results[1]["ruleId"] == "beta"
+        assert results[2]["ruleId"] == "alpha"
