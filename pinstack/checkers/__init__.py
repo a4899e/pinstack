@@ -14,6 +14,8 @@ from pinstack.checkers.github_actions import GitHubActionsChecker
 from pinstack.checkers.go import GoChecker
 from pinstack.checkers.cargo import CargoChecker
 from pinstack.checkers.gemfile import GemfileChecker
+from pinstack.checkers.terraform import TerraformChecker
+from pinstack.checkers.helm import HelmChecker
 
 ALL_CHECKERS = [  # type: List[Type[Checker]]
     RequirementsChecker,
@@ -28,4 +30,6 @@ ALL_CHECKERS = [  # type: List[Type[Checker]]
     GoChecker,
     CargoChecker,
     GemfileChecker,
+    TerraformChecker,
+    HelmChecker,
 ]

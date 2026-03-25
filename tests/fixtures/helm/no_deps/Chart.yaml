@@ -1,0 +1,4 @@
+apiVersion: v2
+name: my-simple-app
+version: 0.1.0
+description: A simple chart with no dependencies
