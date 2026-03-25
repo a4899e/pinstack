@@ -1,8 +1,7 @@
 """Helm checker: enforces Chart.lock existence when dependencies declared, and digest presence."""
 
-import fnmatch
 import os
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 

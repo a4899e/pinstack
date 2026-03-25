@@ -1,10 +1,8 @@
 """SARIF 2.1.0 output builder (stdlib json only)."""
 
 import json
-from typing import List
 
 import pinstack
-from pinstack.core import Finding
 
 
 def format_sarif(findings):

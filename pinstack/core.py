@@ -4,7 +4,7 @@ import fnmatch
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Type
+from typing import Dict, Set
 
 EXCLUDED_DIRS = frozenset([
     ".git", "node_modules", ".venv", "venv", "__pycache__",

@@ -3,7 +3,6 @@
 import argparse
 import os
 import sys
-from typing import List, Optional
 
 import pinstack
 from pinstack.core import (

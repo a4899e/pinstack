@@ -4,9 +4,7 @@ import os
 import tempfile
 import shutil
 
-import pytest
 
-from pinstack.core import build_index
 from pinstack.checkers.requirements import RequirementsChecker
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "requirements")

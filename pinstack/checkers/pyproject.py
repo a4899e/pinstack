@@ -1,9 +1,8 @@
 """Pyproject checker: enforces == pinning in [project] dependencies and optional-dependencies."""
 
-import fnmatch
 import os
 import re
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 
@@ -386,7 +385,6 @@ def _find_dep_line(raw_lines, dep):
     Returns 1-based line number, or 0 if not found.
     """
     # Escape for searching: just look for the dep string inside quotes
-    dep_escaped = dep.replace(".", r"\.").replace("[", r"\[").replace("]", r"\]")
     pattern = re.compile(re.escape(dep))
     for i, line in enumerate(raw_lines):
         if pattern.search(line):

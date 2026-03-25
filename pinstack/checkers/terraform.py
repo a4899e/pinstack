@@ -2,7 +2,7 @@
 
 import fnmatch
 import os
-from typing import Dict, List, Optional, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 

@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 import pinstack
 from pinstack.core import Finding

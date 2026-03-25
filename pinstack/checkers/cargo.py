@@ -1,9 +1,8 @@
 """Cargo checker: enforces checksum presence in Cargo.lock for registry packages."""
 
-import fnmatch
 import os
 import re
-from typing import Dict, List, Optional, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 
@@ -130,7 +129,6 @@ class CargoChecker(Checker):
             # Cross-reference: every Cargo.toml dep must appear in Cargo.lock
             if "Cargo.toml" in files:
                 toml_path = os.path.join(dir_path, "Cargo.toml")
-                rel_toml = os.path.relpath(toml_path, root)
                 toml_deps = _parse_cargo_toml_deps(toml_path)
                 lock_names = _parse_cargo_lock_names(lines)
 

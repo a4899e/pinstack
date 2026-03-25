@@ -1,7 +1,7 @@
 """pnpm-lock.yaml checker: warns when package entries are missing an integrity hash."""
 
 import os
-from typing import Dict, List, Optional, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 

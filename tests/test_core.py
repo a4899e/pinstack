@@ -1,7 +1,6 @@
 """Tests for pinstack.core — FileIndex, Finding, Checker, CheckerRegistry, runner, formatter."""
 
 import os
-import sys
 import tempfile
 
 import pytest
@@ -447,7 +446,7 @@ class TestFormatText:
         ]
         output = format_text(findings)
         lines = output.splitlines()
-        fail_lines = [l for l in lines if l.startswith("FAIL")]
+        fail_lines = [line for line in lines if line.startswith("FAIL")]
         assert len(fail_lines) == 2
 
     def test_format_text_error_counts(self):

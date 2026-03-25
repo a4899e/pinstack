@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 

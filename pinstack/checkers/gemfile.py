@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 
@@ -92,7 +92,6 @@ class GemfileChecker(Checker):
             if has_gemfile and has_lock:
                 gemfile_path = os.path.join(dir_path, "Gemfile")
                 lock_path = os.path.join(dir_path, "Gemfile.lock")
-                rel_gemfile = os.path.relpath(gemfile_path, root)
 
                 gemfile_deps = _parse_gemfile_deps(gemfile_path)
                 lock_specs = _parse_gemfile_lock_specs(lock_path)

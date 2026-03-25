@@ -4,7 +4,6 @@ import os
 import tempfile
 import shutil
 
-import pytest
 
 from pinstack.checkers.pyproject import PyprojectChecker, extract_dependency_arrays
 

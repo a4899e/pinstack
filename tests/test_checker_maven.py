@@ -121,7 +121,7 @@ class TestMavenPropertyVersion:
     def test_property_version_no_findings(self):
         findings = _check("property_version")
         assert findings == [], (
-            "Property reference ${...} version should produce 0 findings, got: {}".format(
+            "Property reference version should produce 0 findings, got: {!r}".format(
                 [f.message for f in findings]
             )
         )

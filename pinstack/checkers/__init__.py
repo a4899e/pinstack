@@ -1,7 +1,5 @@
 """Checker registry -- imports all checker modules."""
-from typing import List, Type
 
-from pinstack.core import Checker
 from pinstack.checkers.requirements import RequirementsChecker
 from pinstack.checkers.pyproject import PyprojectChecker
 from pinstack.checkers.package_json import PackageJsonChecker
@@ -19,7 +17,7 @@ from pinstack.checkers.helm import HelmChecker
 from pinstack.checkers.maven import MavenChecker
 from pinstack.checkers.gradle import GradleChecker
 
-ALL_CHECKERS = [  # type: List[Type[Checker]]
+ALL_CHECKERS = [
     RequirementsChecker,
     PyprojectChecker,
     PackageJsonChecker,

@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from pinstack.core import Checker, Finding
 
@@ -99,7 +99,6 @@ class GoChecker(Checker):
             sum_path = os.path.join(dir_path, "go.sum")
             mod_path = os.path.join(dir_path, "go.mod")
             rel_sum = os.path.relpath(sum_path, root)
-            rel_mod = os.path.relpath(mod_path, root)
 
             try:
                 with open(sum_path, "r", encoding="utf-8", errors="replace") as fh:
