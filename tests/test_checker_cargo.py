@@ -64,6 +64,17 @@ class TestCargoLocalCrate:
         )
 
 
+class TestCargoGitSource:
+    def test_git_source_no_false_positive(self):
+        """Git-sourced packages legitimately have no checksum and must not be flagged."""
+        findings = _check("git_source")
+        assert findings == [], (
+            "Git-sourced package without checksum should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
+        )
+
+
 class TestCargoNoLock:
     def test_no_cargo_lock_no_findings(self):
         assert _check_empty() == []

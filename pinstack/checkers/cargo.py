@@ -81,15 +81,17 @@ class CargoChecker(Checker):
             except OSError:
                 continue
 
-            # Parse [[package]] blocks for checksum checks
+            # Parse [[package]] blocks for checksum checks.
+            # Only registry packages (source = "registry+...") require checksums.
+            # Git packages (source = "git+...") legitimately have no checksum.
             in_package = False
             pkg_name: Optional[str] = None
             pkg_line = 0
-            has_source = False
+            is_registry_source = False
             has_checksum = False
 
             def flush_package(findings_list: list[Finding], rp: str) -> None:
-                if in_package and has_source and not has_checksum and pkg_name is not None:
+                if in_package and is_registry_source and not has_checksum and pkg_name is not None:
                     findings_list.append(Finding(
                         checker="cargo",
                         path=rp,
@@ -106,7 +108,7 @@ class CargoChecker(Checker):
                     in_package = True
                     pkg_name = None
                     pkg_line = lineno
-                    has_source = False
+                    is_registry_source = False
                     has_checksum = False
                     continue
 
@@ -116,7 +118,8 @@ class CargoChecker(Checker):
                 if line.startswith("name = "):
                     pkg_name = line[len("name = "):].strip().strip('"')
                 elif line.startswith("source = "):
-                    has_source = True
+                    source_val = line[len("source = "):].strip().strip('"')
+                    is_registry_source = source_val.startswith("registry+")
                 elif line.startswith("checksum = "):
                     has_checksum = True
 
