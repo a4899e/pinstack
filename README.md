@@ -303,4 +303,4 @@ invoke clean     # remove .pyc, caches, build artifacts
 
 Apache 2.0. See [LICENSE](LICENSE) for the full text.
 
-Copyright 2024 smthmlk
+Copyright 2024 Trevor T. <trevort@scantonomous.ai>
