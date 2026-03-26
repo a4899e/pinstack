@@ -771,3 +771,47 @@ class TestPoetryDependencies:
             assert "black" in stale[0].message
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_git_inline_table_flagged(self):
+        """Git deps in inline tables should be flagged, not silently skipped."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'internal-lib = { git = "https://github.com/example/internal-lib.git", rev = "abcdef" }\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1, "git inline-table dep should be flagged, got: {}".format(
+                [f.message for f in pin_findings]
+            )
+            assert "internal-lib" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_git_dep_included_in_cross_ref(self):
+        """Git inline-table deps should be in the manifest set for lock file cross-referencing."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_content = (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'internal-lib = { git = "https://github.com/example/lib.git", rev = "abc" }\n'
+            )
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            lock_path = os.path.join(tmpdir, "poetry.lock")
+            with open(toml_path, "w") as fh:
+                fh.write(toml_content)
+            with open(lock_path, "w") as fh:
+                fh.write('[[package]]\nname = "requests"\nversion = "2.28.0"\n')
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            stale = [f for f in findings if "stale" in f.message]
+            assert len(stale) == 1
+            assert "internal_lib" in stale[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)

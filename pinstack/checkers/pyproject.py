@@ -303,7 +303,9 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
             if it_match:
                 version = it_match.group(1)
                 results.append((pkg, version, lineno))
-            # No version key in inline table — skip (e.g. git deps)
+            else:
+                # No version key — git/url dep, not content-addressed
+                results.append((pkg, "", lineno))
             continue
 
         # Simple string: "^2.28"
