@@ -191,6 +191,42 @@ class TestYarnLockGood:
         assert _check_empty(YarnLockChecker()) == []
 
 
+class TestYarnBerryChecksum:
+    def test_yarn_berry_checksum(self):
+        """Yarn Berry lockfiles using checksum: instead of integrity should produce 0 findings."""
+        import tempfile
+        content = (
+            '__metadata:\n'
+            '  version: 6\n'
+            '  cacheKey: 8\n'
+            '\n'
+            '"express@npm:4.18.2":\n'
+            '  version: 4.18.2\n'
+            '  resolution: "express@npm:4.18.2"\n'
+            '  checksum: 10/abc123def456\n'
+            '\n'
+            '"lodash@npm:4.17.21":\n'
+            '  version: 4.17.21\n'
+            '  resolution: "lodash@npm:4.17.21"\n'
+            '  checksum: 10/789xyz\n'
+        )
+        tmpdir = tempfile.mkdtemp()
+        try:
+            lock_path = os.path.join(tmpdir, "yarn.lock")
+            with open(lock_path, "w") as fh:
+                fh.write(content)
+            index = {tmpdir: {"yarn.lock"}}
+            findings = YarnLockChecker().check(index, tmpdir)
+            assert findings == [], (
+                "Yarn Berry checksum: should be accepted, got: {}".format(
+                    [f.message for f in findings]
+                )
+            )
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 class TestYarnLockBad:
     def setup_method(self):
         self.findings = _check_fixture_dir(YarnLockChecker(), "yarn_lock/bad")

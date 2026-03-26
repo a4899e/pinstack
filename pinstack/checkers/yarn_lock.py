@@ -38,11 +38,17 @@ def _parse_yarn_lock(lines: list[str]) -> list[tuple]:
             if current_header is not None:
                 blocks.append((current_header, current_start, current_has_integrity))
                 current_has_integrity = False
-            current_header = stripped[:-1]  # strip trailing ":"
-            current_start = lineno
+            header_name = stripped[:-1]  # strip trailing ":"
+            # Skip Yarn Berry __metadata block — it is not a package entry
+            if header_name == "__metadata":
+                current_header = None
+            else:
+                current_header = header_name
+                current_start = lineno
         elif current_header is not None:
             # Indented line — field inside a block
-            if stripped.startswith("integrity "):
+            # Accept both Yarn classic "integrity" and Yarn Berry "checksum:"
+            if stripped.startswith("integrity ") or stripped.startswith("checksum:"):
                 current_has_integrity = True
 
     # Flush any open block at EOF
