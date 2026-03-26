@@ -574,11 +574,17 @@ class TestValidateUrlFragmentHashes:
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_multiple_hashes_one_invalid(self):
+    def test_multiple_hashes_one_valid_one_invalid(self):
+        """One valid hash is enough — pip only needs one to verify. Bad sha512 ignored."""
         url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 32  # wrong len
         errors = validate_url_fragment_hashes(url)
-        assert len(errors) == 1
-        assert "sha512" in errors[0]
+        assert errors == []
+
+    def test_multiple_hashes_all_invalid(self):
+        """All hashes malformed — should report errors."""
+        url = "https://example.com/lib.tar.gz#sha256=bad&sha512=bad"
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) >= 1
 
     def test_case_insensitive_algorithm(self):
         url = "https://example.com/lib.tar.gz#SHA256=" + "a" * 64

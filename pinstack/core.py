@@ -74,7 +74,7 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
     fields = fragment.split("&")
 
     errors: list[str] = []
-    found_any_hash = False
+    has_valid_hash = False
     seen_algorithms: set[str] = set()
 
     for field in fields:
@@ -92,7 +92,6 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
             continue
         seen_algorithms.add(key)
 
-        found_any_hash = True
         expected_len = _HASH_ALGORITHMS[key]
 
         if not value:
@@ -103,9 +102,17 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
             errors.append("{} hash has wrong length: expected {} hex chars, got {}".format(
                 key, expected_len, len(value),
             ))
+        else:
+            has_valid_hash = True
 
-    if not found_any_hash:
+    if not seen_algorithms:
         return ["no hash algorithm found in URL fragment"]
+
+    # pip only needs one valid hash to verify integrity. If any algorithm
+    # has a valid digest, the URL is considered hash-verified — even if
+    # other algorithms in the same fragment are malformed.
+    if has_valid_hash:
+        return []
 
     return errors
 
