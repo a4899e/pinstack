@@ -15,6 +15,7 @@ from pinstack.core import (
     build_index,
     format_text,
     run_checkers,
+    validate_url_fragment_hashes,
 )
 
 
@@ -492,3 +493,94 @@ class TestFormatText:
         # Should contain "Makefile" but NOT "Makefile:0"
         assert "Makefile" in output
         assert "Makefile:0" not in output
+
+
+# ---------------------------------------------------------------------------
+# validate_url_fragment_hashes
+# ---------------------------------------------------------------------------
+
+class TestValidateUrlFragmentHashes:
+    def test_no_fragment(self):
+        errors = validate_url_fragment_hashes("https://example.com/lib.tar.gz")
+        assert len(errors) == 1
+        assert "no hash fragment" in errors[0]
+
+    def test_fragment_no_hash(self):
+        errors = validate_url_fragment_hashes("https://example.com/lib.tar.gz#subdirectory=src")
+        assert len(errors) == 1
+        assert "no hash algorithm" in errors[0]
+
+    def test_valid_sha256(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_valid_sha512(self):
+        url = "https://example.com/lib.tar.gz#sha512=" + "b" * 128
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_valid_sha1(self):
+        url = "https://example.com/lib.tar.gz#sha1=" + "c" * 40
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_valid_sha224(self):
+        url = "https://example.com/lib.tar.gz#sha224=" + "d" * 56
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_valid_sha384(self):
+        url = "https://example.com/lib.tar.gz#sha384=" + "e" * 96
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_valid_md5(self):
+        url = "https://example.com/lib.tar.gz#md5=" + "f" * 32
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_wrong_length_sha256(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 32  # should be 64
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) == 1
+        assert "wrong length" in errors[0]
+        assert "64" in errors[0]
+
+    def test_non_hex_characters(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "g" * 64
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) == 1
+        assert "non-hex" in errors[0]
+
+    def test_empty_hash_value(self):
+        url = "https://example.com/lib.tar.gz#sha256="
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) == 1
+        assert "empty" in errors[0]
+
+    def test_hash_after_subdirectory(self):
+        url = "https://example.com/lib.tar.gz#subdirectory=src&sha256=" + "a" * 64
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_subdirectory_after_hash(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&subdirectory=src"
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_multiple_valid_hashes(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 128
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_multiple_hashes_one_invalid(self):
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 32  # wrong len
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) == 1
+        assert "sha512" in errors[0]
+
+    def test_case_insensitive_algorithm(self):
+        url = "https://example.com/lib.tar.gz#SHA256=" + "a" * 64
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []

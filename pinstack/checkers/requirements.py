@@ -6,7 +6,7 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
 
 # Matches a package specifier line.
 # Group 1: package name (including optional [extras])
@@ -72,12 +72,13 @@ def _check_line(raw_line: str) -> tuple:
                         return False, False, True, pkg_name  # missing hash warning
                     return True, False, False, ""  # skip, fully pinned
             return False, True, False, pkg_name  # mutable git ref
-        # Non-git URL ref: accept if --hash= present or URL has #sha256= fragment
-        has_hash = "--hash" in line
-        has_fragment_hash = any(h in url_part for h in ("#sha1=", "#sha224=", "#sha256=", "#sha384=", "#sha512=", "#md5="))
-        if not has_hash and not has_fragment_hash:
-            return False, True, False, pkg_name  # not content-addressed
-        return True, False, False, ""  # has hash verification, skip
+        # Non-git URL ref: accept if --hash= present or URL fragment has valid hashes
+        if "--hash" in line:
+            return True, False, False, ""  # pip --hash flag present, skip
+        hash_errors = validate_url_fragment_hashes(url_part)
+        if not hash_errors:
+            return True, False, False, ""  # valid fragment hashes, skip
+        return False, True, False, pkg_name  # not content-addressed
 
     # URL lines are not content-addressed
     if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):

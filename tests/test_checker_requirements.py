@@ -265,20 +265,27 @@ class TestRequirementsCheckerPEP508:
     def test_archive_url_with_fragment_hash_clean(self):
         """https:// URL with #sha256= fragment — 0 findings."""
         findings = self._check(
-            "lib @ https://example.com/lib-1.0.tar.gz#sha256=abcdef1234567890"
+            "lib @ https://example.com/lib-1.0.tar.gz#sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         assert len(findings) == 0
 
     def test_archive_url_with_sha1_fragment_clean(self):
         """https:// URL with #sha1= fragment — 0 findings."""
         findings = self._check(
-            "lib @ https://example.com/lib-1.0.tar.gz#sha1=abcdef1234567890"
+            "lib @ https://example.com/lib-1.0.tar.gz#sha1=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         )
         assert len(findings) == 0
 
     def test_archive_url_with_sha224_fragment_clean(self):
         """https:// URL with #sha224= fragment — 0 findings."""
         findings = self._check(
-            "lib @ https://example.com/lib-1.0.tar.gz#sha224=abcdef1234567890"
+            "lib @ https://example.com/lib-1.0.tar.gz#sha224=cccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_hash_after_subdirectory(self):
+        """#subdirectory=src&sha256=abc — hash not first in fragment."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         assert len(findings) == 0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
 
 # Sections we care about (PEP 621)
 _SECTION_PROJECT = "project"
@@ -340,11 +340,14 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
                     return False, ""
             pkg_name = dep.split(" @ ", 1)[0].strip()
             return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(pkg_name)
-        # Archive/HTTP URLs: accept if URL fragment contains a hash (#sha256=, #md5=, etc.)
+        # Archive/HTTP URLs: validate hash fragments
         pkg_name = dep.split(" @ ", 1)[0].strip()
-        if any(h in url_part for h in ("#sha1=", "#sha224=", "#sha256=", "#sha384=", "#sha512=", "#md5=")):
+        hash_errors = validate_url_fragment_hashes(url_part)
+        if not hash_errors:
             return False, ""
-        return True, "'{}' uses a URL reference without hash verification".format(pkg_name)
+        return True, "'{}' uses a URL reference without valid hash verification ({})".format(
+            pkg_name, "; ".join(hash_errors),
+        )
 
     m = _DEP_RE.match(dep)
     if not m:
