@@ -233,16 +233,15 @@ class TestRequirementsCheckerPEP508:
         assert len(findings) == 1
         assert "lib" in findings[0].message
 
-    def test_immutable_git_sha_missing_hash(self):
-        """git+https://...@<sha> is immutable — no pin error, 1 missing --hash finding."""
+    def test_immutable_git_sha_clean(self):
+        """git+https://...@<sha> is immutable — VCS deps can't be hashed, so 0 findings."""
         findings = self._check(
             "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
         )
-        assert len(findings) == 1
-        assert "hash" in findings[0].message.lower()
+        assert len(findings) == 0
 
-    def test_immutable_git_sha_with_hash_clean(self):
-        """Fully pinned: commit SHA + --hash — 0 findings."""
+    def test_immutable_git_sha_with_hash_also_clean(self):
+        """Commit SHA + --hash (if someone manages it) — still 0 findings."""
         findings = self._check(
             "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
             " --hash=sha256:abcdef1234567890"

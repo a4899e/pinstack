@@ -67,9 +67,9 @@ def _check_line(raw_line: str) -> tuple:
             if at_pos >= 0:
                 ref = url_part[at_pos + 1:]
                 if re.match(r'^[0-9a-f]{40}$', ref):
-                    # Immutable commit SHA — check for --hash in original line
-                    if "--hash" not in line:
-                        return False, False, True, pkg_name  # missing hash warning
+                    # Immutable commit SHA — VCS deps are built from source,
+                    # so pip cannot produce --hash for them.  The SHA pin is
+                    # sufficient for integrity verification.
                     return True, False, False, ""  # skip, fully pinned
             return False, True, False, pkg_name  # mutable git ref
         # Non-git URL ref: accept if --hash= present or URL fragment has valid hashes
