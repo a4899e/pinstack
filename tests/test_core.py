@@ -569,36 +569,38 @@ class TestValidateUrlFragmentHashes:
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_multiple_valid_hashes(self):
+    def test_first_hash_valid_second_ignored(self):
+        """pip uses only the first hash field. Second hash (even if different algo) is ignored."""
         url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 128
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_multiple_hashes_one_valid_one_invalid(self):
-        """One valid hash is enough — pip only needs one to verify. Bad sha512 ignored."""
-        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 32  # wrong len
+    def test_first_hash_valid_second_bad_still_passes(self):
+        """First hash is valid — bad second hash is ignored (pip only checks first)."""
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=bad"
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_multiple_hashes_all_invalid(self):
-        """All hashes malformed — should report errors."""
-        url = "https://example.com/lib.tar.gz#sha256=bad&sha512=bad"
+    def test_first_hash_bad_second_valid_fails(self):
+        """First hash is bad — valid second hash doesn't save it (pip uses first)."""
+        url = "https://example.com/lib.tar.gz#sha512=bad&sha256=" + "a" * 64
         errors = validate_url_fragment_hashes(url)
-        assert len(errors) >= 1
+        assert len(errors) == 1
+        assert "sha512" in errors[0]
 
     def test_case_insensitive_algorithm(self):
         url = "https://example.com/lib.tar.gz#SHA256=" + "a" * 64
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_duplicate_algorithm_first_valid_second_bad(self):
-        """pip uses the first value per algorithm. Valid first + bad duplicate = accepted."""
+    def test_duplicate_first_valid_second_bad(self):
+        """Same algorithm twice — first is valid, second ignored (pip uses first per algo)."""
         url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha256=bad"
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 
-    def test_duplicate_algorithm_first_bad_second_valid(self):
-        """pip uses the first value. Bad first + valid duplicate = rejected."""
+    def test_duplicate_first_bad_second_valid(self):
+        """Same algorithm twice — first is bad, valid second ignored (pip uses first)."""
         url = "https://example.com/lib.tar.gz#sha256=xyz&sha256=" + "a" * 64
         errors = validate_url_fragment_hashes(url)
         assert len(errors) == 1

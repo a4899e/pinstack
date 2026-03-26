@@ -73,10 +73,9 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
     fragment = url.split("#", 1)[1]
     fields = fragment.split("&")
 
-    errors: list[str] = []
-    has_valid_hash = False
-    seen_algorithms: set[str] = set()
-
+    # pip uses the first supported hash fragment it encounters for
+    # verification, ignoring all subsequent hash fields. Match that:
+    # find the first hash algorithm field and validate only that one.
     for field in fields:
         if "=" not in field:
             continue
@@ -86,35 +85,20 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
         if key not in _HASH_ALGORITHMS:
             continue  # skip non-hash fields like subdirectory=
 
-        # pip uses the first value per algorithm and ignores duplicates.
-        # Match that behavior: only validate the first occurrence.
-        if key in seen_algorithms:
-            continue
-        seen_algorithms.add(key)
-
+        # This is the first hash field — validate it and return.
         expected_len = _HASH_ALGORITHMS[key]
 
         if not value:
-            errors.append("{} hash is empty".format(key))
-        elif not _HEX_RE.match(value):
-            errors.append("{} hash contains non-hex characters: {}".format(key, value))
-        elif len(value) != expected_len:
-            errors.append("{} hash has wrong length: expected {} hex chars, got {}".format(
+            return ["{} hash is empty".format(key)]
+        if not _HEX_RE.match(value):
+            return ["{} hash contains non-hex characters: {}".format(key, value)]
+        if len(value) != expected_len:
+            return ["{} hash has wrong length: expected {} hex chars, got {}".format(
                 key, expected_len, len(value),
-            ))
-        else:
-            has_valid_hash = True
+            )]
+        return []  # valid first hash
 
-    if not seen_algorithms:
-        return ["no hash algorithm found in URL fragment"]
-
-    # pip only needs one valid hash to verify integrity. If any algorithm
-    # has a valid digest, the URL is considered hash-verified — even if
-    # other algorithms in the same fragment are malformed.
-    if has_valid_hash:
-        return []
-
-    return errors
+    return ["no hash algorithm found in URL fragment"]
 
 
 DEFAULT_MAX_DEPTH = 4
