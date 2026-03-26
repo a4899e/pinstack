@@ -20,8 +20,8 @@ _POETRY_GROUP_DEPS_RE = re.compile(r'^tool\.poetry\.group\.[^.]+\.dependencies$'
 # Matches a TOML section header like [project] or [project.optional-dependencies]
 _SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]')
 
-# Matches a key = [ start of an array assignment (keys may contain hyphens/dots)
-_ARRAY_START_RE = re.compile(r'^\s*([A-Za-z0-9_.\-]+)\s*=\s*\[')
+# Matches a key = [ start of an array assignment (bare or quoted keys)
+_ARRAY_START_RE = re.compile(r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.\-]+))\s*=\s*\[')
 
 # Operators that are NOT ==
 _BAD_OPERATORS_RE = re.compile(r'(!=|~=|>=|<=|>(?!=)|<(?!=))')
@@ -141,7 +141,7 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
         if not array_match:
             continue
 
-        key = array_match.group(1)
+        key = array_match.group(1) or array_match.group(2) or array_match.group(3)
 
         # Determine if this is a dependency array we care about
         if current_section == _SECTION_PROJECT and key != "dependencies":
@@ -187,12 +187,24 @@ def _parse_array_items_from_line(text: str) -> list[str]:
     """
     Extract quoted string tokens from a TOML array line fragment.
     Returns a list of raw tokens (still quoted, may have trailing commas).
+
+    Inline table objects ({...}) are skipped — they are not dependency
+    specifier strings (e.g. PEP 735 include-group directives).
     """
     tokens: list[str] = []
     i = 0
+    in_inline_table = 0  # brace nesting depth
     while i < len(text):
         ch = text[i]
-        if ch in ('"', "'"):
+        if ch == '{':
+            in_inline_table += 1
+            i += 1
+        elif ch == '}':
+            in_inline_table = max(0, in_inline_table - 1)
+            i += 1
+        elif in_inline_table:
+            i += 1  # skip everything inside inline tables
+        elif ch in ('"', "'"):
             quote = ch
             j = i + 1
             while j < len(text) and text[j] != quote:
