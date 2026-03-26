@@ -166,6 +166,30 @@ class TestExtractDependencyArrays:
         assert "ruff==0.15.5" in dev_deps
         assert "base" not in dev_deps
 
+    def test_hatch_env_dependencies(self):
+        """[tool.hatch.envs.*.dependencies] arrays should be extracted."""
+        content = (
+            '[tool.hatch.envs.default]\n'
+            'dependencies = [\n'
+            '    "pytest==9.0.2",\n'
+            '    "ruff>=0.15.0",\n'
+            ']\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "pytest==9.0.2" in deps
+        assert "ruff>=0.15.0" in deps
+
+    def test_tool_section_non_dep_key_ignored(self):
+        """Arrays in tool sections whose key doesn't contain 'dependencies' are skipped."""
+        content = (
+            '[tool.ruff.lint]\n'
+            'select = ["E", "F", "W"]\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 0
+
     def test_ignores_classifiers_array(self):
         content = (
             '[project]\n'
@@ -191,10 +215,17 @@ class TestExtractDependencyArrays:
         assert total_deps == 0
 
     def test_no_section_header(self):
-        """Dependencies declared before any section header are not in [project]."""
+        """A 'dependencies' array before any section header is still extracted."""
         content = 'dependencies = [\n    "flask==2.3.2",\n]\n'
         arrays = extract_dependency_arrays(content)
-        # Should return no arrays (not in a recognised section)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "flask==2.3.2" in deps
+
+    def test_non_dep_key_outside_project_ignored(self):
+        """Non-dependency arrays outside [project] are ignored."""
+        content = 'classifiers = [\n    "Development Status :: 3 - Alpha",\n]\n'
+        arrays = extract_dependency_arrays(content)
         assert len(arrays) == 0
 
     def test_trailing_comma_handled(self):

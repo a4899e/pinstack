@@ -69,10 +69,11 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
       deps  -- list of dependency specifier strings (quotes stripped)
       label -- human-readable label for the array (e.g. "dependencies", "dev")
 
-    Only arrays under [project] (key == "dependencies"),
-    [project.optional-dependencies] (any key), and
-    [dependency-groups] (PEP 735, any key) are returned.
-    Other arrays like classifiers, requires, etc. are ignored.
+    Under [project], only the "dependencies" key is returned (classifiers,
+    requires, etc. are skipped).  Under [project.optional-dependencies] and
+    [dependency-groups], any key is a dep group.  For all other sections,
+    arrays whose key contains "dependencies" are returned (catches
+    tool.hatch.envs.*.dependencies, tool.pdm.dev-dependencies, etc.).
     """
     results: list[tuple[list[str], str]] = []
     current_section = ""   # current TOML section name
@@ -133,20 +134,28 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
                     current_deps.append(val)
             continue
 
-        # --- Look for array start in valid sections ---
-        if current_section not in (_SECTION_PROJECT, _SECTION_OPTIONAL, _SECTION_DEP_GROUPS):
-            continue
-
+        # --- Look for array start ---
         array_match = _ARRAY_START_RE.match(stripped)
         if not array_match:
             continue
 
         key = array_match.group(1) or array_match.group(2) or array_match.group(3)
 
-        # Determine if this is a dependency array we care about
-        if current_section == _SECTION_PROJECT and key != "dependencies":
-            continue  # skip classifiers, requires, etc.
-        # For optional-dependencies, any key is a dep group
+        # Determine if this is a dependency array we care about.
+        # Under [project], only the "dependencies" key is a dep array
+        # (skip classifiers, requires, etc.).
+        # Under [project.optional-dependencies] and [dependency-groups],
+        # any key is a dep group name.
+        # For all other sections, accept arrays whose key contains
+        # "dependencies" (catches tool.hatch.envs.*.dependencies,
+        # tool.pdm.dev-dependencies, etc.).
+        if current_section == _SECTION_PROJECT:
+            if key != "dependencies":
+                continue
+        elif current_section in (_SECTION_OPTIONAL, _SECTION_DEP_GROUPS):
+            pass  # any key is a dep group
+        elif "dependencies" not in key:
+            continue
 
         # Find the content after the opening [
         after_bracket = stripped[array_match.end():]  # everything after '['
