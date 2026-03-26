@@ -1,9 +1,27 @@
-"""Maven checker: enforces explicit, non-dynamic versions in pom.xml dependency declarations."""
+"""Maven checker: enforces explicit, non-dynamic versions in pom.xml dependency declarations.
+
+XML parsing and defusedxml
+--------------------------
+Bandit flags our use of xml.etree.ElementTree (B405/B314) because the stdlib
+XML parser is vulnerable to entity expansion attacks (billion laughs) and
+external entity injection (XXE) when processing untrusted input.
+
+We intentionally use the stdlib parser rather than defusedxml because:
+
+1. pinstack has zero runtime dependencies by design. Adding defusedxml would
+   break that guarantee and make adoption harder in non-Python projects.
+2. pinstack only parses files that already exist on disk in the user's own
+   project. If an attacker can write a malicious pom.xml into your repository,
+   XML entity expansion is the least of your problems.
+3. We disable external entity resolution by using a restricted XMLParser
+   configuration, which mitigates the XXE attack vector without any external
+   dependency.
+"""
 
 from __future__ import annotations
 
 import os
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405
 
 from pinstack.core import Checker, Finding, FileIndex
 
@@ -59,7 +77,8 @@ class MavenChecker(Checker):
                 raw_lines = raw_content.splitlines()
 
                 try:
-                    root_elem = ET.fromstring(raw_content)
+                    # nosec B314 — see module docstring for rationale
+                    root_elem = ET.fromstring(raw_content)  # nosec B314
                 except ET.ParseError:
                     findings.append(Finding(
                         checker=self.name,

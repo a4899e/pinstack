@@ -22,3 +22,4 @@ def build(c):
     """Lint, type-check, and run tests."""
     c.run("ruff check .")
     c.run("pyright")
+    c.run("bandit -r pinstack/")
