@@ -1,6 +1,10 @@
 """Tests for the Helm chart checker."""
 
+from __future__ import annotations
+
 import os
+import shutil
+import tempfile
 
 from pinstack.checkers.helm import HelmChecker
 
@@ -153,6 +157,48 @@ class TestHelmCrossRef:
         assert cross_ref == [], "All deps present in lock — expected no cross-ref findings, got: {}".format(
             [f.message for f in findings]
         )
+
+    def test_top_level_digest_accepted(self):
+        """Chart.lock with a single top-level digest: (not per-dep) should produce 0 findings."""
+        chart_yaml = (
+            "apiVersion: v2\n"
+            "name: my-app\n"
+            "dependencies:\n"
+            "  - name: nginx\n"
+            "    version: \"15.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+            "  - name: redis\n"
+            "    version: \"17.0.0\"\n"
+            "    repository: https://charts.bitnami.com/bitnami\n"
+        )
+        # Top-level digest covers both deps — no per-dep digests present
+        chart_lock = (
+            "dependencies:\n"
+            "- name: nginx\n"
+            "  version: \"15.0.0\"\n"
+            "  repository: https://charts.bitnami.com/bitnami\n"
+            "- name: redis\n"
+            "  version: \"17.0.0\"\n"
+            "  repository: https://charts.bitnami.com/bitnami\n"
+            "digest: sha256:toplevelabc123\n"
+            "generated: \"2024-01-01T00:00:00Z\"\n"
+        )
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "Chart.yaml"), "w") as fh:
+                fh.write(chart_yaml)
+            with open(os.path.join(d, "Chart.lock"), "w") as fh:
+                fh.write(chart_lock)
+            index = {d: {"Chart.yaml", "Chart.lock"}}
+            findings = HelmChecker().check(index, d)
+            digest_findings = [f for f in findings if "digest" in f.message]
+            assert digest_findings == [], (
+                "Top-level digest should be accepted, got: {}".format(
+                    [f.message for f in findings]
+                )
+            )
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     def test_multiple_deps_one_missing(self):
         chart_yaml = (

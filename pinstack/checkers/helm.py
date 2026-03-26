@@ -111,7 +111,14 @@ class HelmChecker(Checker):
         return names
 
     def _check_lock_digests(self, path: str, rel_path: str) -> list[Finding]:
-        """Parse Chart.lock line-by-line; warn if any dependency block lacks a digest: field."""
+        """Parse Chart.lock line-by-line; warn if any dependency block lacks a digest: field.
+
+        Chart.lock format has per-dependency digest: fields (one per dep entry).
+        Some older or tool-generated Chart.lock files instead carry a single
+        top-level digest: field (after the generated: line) that covers the
+        entire dependency set.  Either form is accepted as valid — if ANY
+        digest: line is present in the file we do not flag it as missing.
+        """
         findings: list[Finding] = []
 
         try:
@@ -119,6 +126,16 @@ class HelmChecker(Checker):
                 lines = fh.readlines()
         except OSError:
             return findings
+
+        # First pass: check for a top-level (non-indented) digest: line.
+        # If one exists the whole lock is considered verified; no per-dep
+        # checks are needed.
+        for raw_line in lines:
+            stripped_bare = raw_line.lstrip()
+            bare = raw_line.rstrip()
+            if not bare[0:1].isspace() and stripped_bare.startswith("digest:"):
+                # Top-level digest covers the full dependency set — accept as valid.
+                return findings
 
         # Each dependency entry starts with "- name:" and ends when the next
         # "- name:" or end-of-dependencies section is reached.
