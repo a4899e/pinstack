@@ -82,6 +82,90 @@ class TestExtractDependencyArrays:
         assert "pytest==7.4.0" in all_deps
         assert "sphinx==7.1.0" in all_deps
 
+    def test_optional_dependencies_hyphenated_key(self):
+        """Keys with hyphens like local-llm should be matched."""
+        content = (
+            '[project.optional-dependencies]\n'
+            'local-llm = ["mlx-lm>=0.20.0"]\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "mlx-lm>=0.20.0" in deps
+        assert label == "local-llm"
+
+    def test_quoted_hyphenated_key(self):
+        """Quoted keys like "local-llm" should be matched."""
+        content = (
+            '[project.optional-dependencies]\n'
+            '"local-llm" = ["mlx-lm>=0.20.0"]\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "mlx-lm>=0.20.0" in deps
+        assert label == "local-llm"
+
+    def test_single_quoted_key(self):
+        """Single-quoted keys should be matched."""
+        content = (
+            '[dependency-groups]\n'
+            "'dev-test' = [\"pytest>=8.3.0\"]\n"
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "pytest>=8.3.0" in deps
+        assert label == "dev-test"
+
+    def test_dependency_groups_pep735(self):
+        """[dependency-groups] (PEP 735) arrays should be extracted."""
+        content = (
+            '[dependency-groups]\n'
+            'dev = [\n'
+            '    "pytest==9.0.2",\n'
+            '    "ruff==0.15.5",\n'
+            ']\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "pytest==9.0.2" in deps
+        assert "ruff==0.15.5" in deps
+        assert label == "dev"
+
+    def test_dependency_groups_include_group_skipped(self):
+        """PEP 735 {include-group = "base"} objects should not be parsed as deps."""
+        content = (
+            '[dependency-groups]\n'
+            'base = ["pytest==8.3.0"]\n'
+            'dev = [{include-group = "base"}, "ruff==0.15.5"]\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 2
+        # base group
+        base_deps = [d for deps, label in arrays if label == "base" for d in deps]
+        assert "pytest==8.3.0" in base_deps
+        # dev group should only have ruff, not "base"
+        dev_deps = [d for deps, label in arrays if label == "dev" for d in deps]
+        assert "ruff==0.15.5" in dev_deps
+        assert "base" not in dev_deps
+
+    def test_dependency_groups_include_group_multiline(self):
+        """Multi-line arrays with include-group objects should skip the objects."""
+        content = (
+            '[dependency-groups]\n'
+            'base = ["pytest==8.3.0"]\n'
+            'dev = [\n'
+            '    {include-group = "base"},\n'
+            '    "ruff==0.15.5",\n'
+            ']\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        dev_deps = [d for deps, label in arrays if label == "dev" for d in deps]
+        assert "ruff==0.15.5" in dev_deps
+        assert "base" not in dev_deps
+
     def test_ignores_classifiers_array(self):
         content = (
             '[project]\n'
@@ -293,6 +377,93 @@ class TestPyprojectCheckerOptionalDeps:
             findings = checker.check(index, tmpdir)
             assert len(findings) == 1
             assert "pytest" in findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestPyprojectCheckerHyphenatedOptionalKey:
+    def test_hyphenated_optional_dep_key_flagged(self):
+        """Hyphenated keys like local-llm under optional-dependencies should be checked."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            with open(toml_path, "w") as fh:
+                fh.write(
+                    '[project.optional-dependencies]\n'
+                    'local-llm = ["mlx-lm>=0.20.0"]\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "mlx-lm" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestDependencyGroups:
+    def test_dependency_groups_unpinned_flagged(self):
+        """[dependency-groups] (PEP 735) entries with >= should be flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            with open(toml_path, "w") as fh:
+                fh.write(
+                    '[dependency-groups]\n'
+                    'dev = [\n'
+                    '    "pytest>=9.0",\n'
+                    '    "ruff==0.15.5",\n'
+                    ']\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "pytest" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_dependency_groups_pinned_clean(self):
+        """[dependency-groups] with all == pins should produce 0 pin findings."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            with open(toml_path, "w") as fh:
+                fh.write(
+                    '[dependency-groups]\n'
+                    'dev = [\n'
+                    '    "pytest==9.0.2",\n'
+                    '    "ruff==0.15.5",\n'
+                    ']\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert pin_findings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_include_group_not_flagged_as_dep(self):
+        """PEP 735 {include-group = "base"} should not produce a bogus finding."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            with open(toml_path, "w") as fh:
+                fh.write(
+                    '[dependency-groups]\n'
+                    'base = ["pytest==8.3.0"]\n'
+                    'dev = [{include-group = "base"}, "ruff==0.15.5"]\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert pin_findings == [], "include-group objects should not produce findings, got: {}".format(
+                [f.message for f in pin_findings]
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

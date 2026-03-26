@@ -1,4 +1,4 @@
-"""Pyproject checker: enforces == pinning in [project] and [tool.poetry] dependencies."""
+"""Pyproject checker: enforces == pinning in [project], [dependency-groups], and [tool.poetry] dependencies."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ import re
 
 from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
 
-# Sections we care about (PEP 621)
+# Sections we care about (PEP 621 + PEP 735)
 _SECTION_PROJECT = "project"
 _SECTION_OPTIONAL = "project.optional-dependencies"
+_SECTION_DEP_GROUPS = "dependency-groups"
 
 # Poetry section prefixes
 _POETRY_DEPS_SECTION = "tool.poetry.dependencies"
@@ -19,8 +20,8 @@ _POETRY_GROUP_DEPS_RE = re.compile(r'^tool\.poetry\.group\.[^.]+\.dependencies$'
 # Matches a TOML section header like [project] or [project.optional-dependencies]
 _SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]')
 
-# Matches a key = [ start of an array assignment
-_ARRAY_START_RE = re.compile(r'^\s*(\w+)\s*=\s*\[')
+# Matches a key = [ start of an array assignment (bare or quoted keys)
+_ARRAY_START_RE = re.compile(r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.\-]+))\s*=\s*\[')
 
 # Operators that are NOT ==
 _BAD_OPERATORS_RE = re.compile(r'(!=|~=|>=|<=|>(?!=)|<(?!=))')
@@ -68,8 +69,9 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
       deps  -- list of dependency specifier strings (quotes stripped)
       label -- human-readable label for the array (e.g. "dependencies", "dev")
 
-    Only arrays under [project] (key == "dependencies") and
-    [project.optional-dependencies] (any key) are returned.
+    Only arrays under [project] (key == "dependencies"),
+    [project.optional-dependencies] (any key), and
+    [dependency-groups] (PEP 735, any key) are returned.
     Other arrays like classifiers, requires, etc. are ignored.
     """
     results: list[tuple[list[str], str]] = []
@@ -132,14 +134,14 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
             continue
 
         # --- Look for array start in valid sections ---
-        if current_section not in (_SECTION_PROJECT, _SECTION_OPTIONAL):
+        if current_section not in (_SECTION_PROJECT, _SECTION_OPTIONAL, _SECTION_DEP_GROUPS):
             continue
 
         array_match = _ARRAY_START_RE.match(stripped)
         if not array_match:
             continue
 
-        key = array_match.group(1)
+        key = array_match.group(1) or array_match.group(2) or array_match.group(3)
 
         # Determine if this is a dependency array we care about
         if current_section == _SECTION_PROJECT and key != "dependencies":
@@ -185,12 +187,24 @@ def _parse_array_items_from_line(text: str) -> list[str]:
     """
     Extract quoted string tokens from a TOML array line fragment.
     Returns a list of raw tokens (still quoted, may have trailing commas).
+
+    Inline table objects ({...}) are skipped — they are not dependency
+    specifier strings (e.g. PEP 735 include-group directives).
     """
     tokens: list[str] = []
     i = 0
+    in_inline_table = 0  # brace nesting depth
     while i < len(text):
         ch = text[i]
-        if ch in ('"', "'"):
+        if ch == '{':
+            in_inline_table += 1
+            i += 1
+        elif ch == '}':
+            in_inline_table = max(0, in_inline_table - 1)
+            i += 1
+        elif in_inline_table:
+            i += 1  # skip everything inside inline tables
+        elif ch in ('"', "'"):
             quote = ch
             j = i + 1
             while j < len(text) and text[j] != quote:
@@ -431,7 +445,7 @@ def _extract_lock_file_names(full_path: str, lock_filename: str) -> set[str]:
 class PyprojectChecker(Checker):
     name = "pyproject"
     description = (
-        "Checks pyproject.toml [project] and [tool.poetry] dependencies for == exact pinning"
+        "Checks pyproject.toml [project], [dependency-groups], and [tool.poetry] dependencies for == exact pinning"
     )
     patterns: list[str] = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]
 
