@@ -118,11 +118,16 @@ class TestMavenSnapshotVersion:
 
 
 class TestMavenPropertyVersion:
-    def test_property_version_no_findings(self):
+    def test_property_version_flagged(self):
         findings = _check("property_version")
-        assert findings == [], (
-            "Property reference version should produce 0 findings, got: {!r}".format(
+        assert len(findings) == 1, (
+            "Property reference version should produce 1 finding, got: {!r}".format(
                 [f.message for f in findings]
+            )
+        )
+        assert "property reference" in findings[0].message, (
+            "Finding message should mention 'property reference', got: {!r}".format(
+                findings[0].message
             )
         )
 

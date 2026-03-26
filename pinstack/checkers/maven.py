@@ -139,8 +139,23 @@ class MavenChecker(Checker):
 
                         version = ver_elem.text.strip()
 
-                        # Property reference — acceptable, cannot resolve without full POM hierarchy
+                        # Property reference — cannot resolve without the full POM hierarchy
+                        # (parent POMs, imported BOMs, command-line -D flags).  We cannot
+                        # verify whether the resolved value is a range, LATEST, or SNAPSHOT,
+                        # so we emit a warning rather than silently accepting it.
                         if version.startswith("${") and version.endswith("}"):
+                            ver_line = _find_version_line(raw_lines, dep_line_idx)
+                            if ver_line == 0:
+                                ver_line = dep_line_idx + 1
+                            findings.append(Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=ver_line,
+                                message=(
+                                    "'{}' version uses property reference '{}' which cannot be"
+                                    " verified; consider using an explicit version".format(coord, version)
+                                ),
+                            ))
                             continue
 
                         # Determine line number of the <version> tag

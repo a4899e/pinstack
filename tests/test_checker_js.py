@@ -149,6 +149,35 @@ class TestPackageLockBad:
         assert not os.path.isabs(self.findings[0].path)
 
 
+class TestPackageLockV1Good:
+    def test_lockfile_v1_good(self):
+        """v1 lockfile with integrity on all deps should produce 0 findings."""
+        findings = _check_fixture_dir(PackageLockChecker(), "package_lock/v1_good")
+        assert findings == [], "v1 lockfile with all integrity hashes should produce 0 findings, got: {}".format(
+            [f.message for f in findings]
+        )
+
+
+class TestPackageLockV1Bad:
+    def setup_method(self):
+        self.findings = _check_fixture_dir(PackageLockChecker(), "package_lock/v1_bad")
+
+    def test_lockfile_v1_bad(self):
+        """v1 lockfile with dep missing integrity should produce 1 finding."""
+        assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
+            len(self.findings), [f.message for f in self.findings]
+        )
+
+    def test_finding_message_contains_package(self):
+        assert "lodash" in self.findings[0].message
+
+    def test_checker_name(self):
+        assert self.findings[0].checker == "package_lock"
+
+    def test_path_is_relative(self):
+        assert not os.path.isabs(self.findings[0].path)
+
+
 # ---------------------------------------------------------------------------
 # yarn.lock
 # ---------------------------------------------------------------------------
