@@ -268,3 +268,17 @@ class TestRequirementsCheckerPEP508:
             "lib @ https://example.com/lib-1.0.tar.gz#sha256=abcdef1234567890"
         )
         assert len(findings) == 0
+
+    def test_archive_url_with_sha1_fragment_clean(self):
+        """https:// URL with #sha1= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha1=abcdef1234567890"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha224_fragment_clean(self):
+        """https:// URL with #sha224= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha224=abcdef1234567890"
+        )
+        assert len(findings) == 0

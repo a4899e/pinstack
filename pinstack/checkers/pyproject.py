@@ -342,7 +342,7 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
             return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(pkg_name)
         # Archive/HTTP URLs: accept if URL fragment contains a hash (#sha256=, #md5=, etc.)
         pkg_name = dep.split(" @ ", 1)[0].strip()
-        if "#sha256=" in url_part or "#md5=" in url_part or "#sha384=" in url_part or "#sha512=" in url_part:
+        if any(h in url_part for h in ("#sha1=", "#sha224=", "#sha256=", "#sha384=", "#sha512=", "#md5=")):
             return False, ""
         return True, "'{}' uses a URL reference without hash verification".format(pkg_name)
 

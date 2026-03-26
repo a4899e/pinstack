@@ -74,7 +74,7 @@ def _check_line(raw_line: str) -> tuple:
             return False, True, False, pkg_name  # mutable git ref
         # Non-git URL ref: accept if --hash= present or URL has #sha256= fragment
         has_hash = "--hash" in line
-        has_fragment_hash = any(h in url_part for h in ("#sha256=", "#md5=", "#sha384=", "#sha512="))
+        has_fragment_hash = any(h in url_part for h in ("#sha1=", "#sha224=", "#sha256=", "#sha384=", "#sha512=", "#md5="))
         if not has_hash and not has_fragment_hash:
             return False, True, False, pkg_name  # not content-addressed
         return True, False, False, ""  # has hash verification, skip

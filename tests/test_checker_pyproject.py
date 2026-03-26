@@ -872,3 +872,17 @@ class TestPEP508DirectReferences:
             "lib @ https://example.com/lib-1.0.tar.gz#sha256=abcdef1234567890"
         )
         assert len(findings) == 0
+
+    def test_archive_url_with_sha1_fragment_accepted(self):
+        """https:// URL with #sha1= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha1=abcdef1234567890"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha224_fragment_accepted(self):
+        """https:// URL with #sha224= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha224=abcdef1234567890"
+        )
+        assert len(findings) == 0
