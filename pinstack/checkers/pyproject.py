@@ -72,8 +72,10 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
     Under [project], only the "dependencies" key is returned (classifiers,
     requires, etc. are skipped).  Under [project.optional-dependencies] and
     [dependency-groups], any key is a dep group.  For all other sections,
-    arrays whose key contains "dependencies" are returned (catches
-    tool.hatch.envs.*.dependencies, tool.pdm.dev-dependencies, etc.).
+    arrays are returned if "dependencies" appears in either the key or the
+    section name (catches tool.hatch.envs.*.dependencies,
+    tool.pdm.dev-dependencies, etc.).  Bare top-level arrays before any
+    section header are ignored.
     """
     results: list[tuple[list[str], str]] = []
     current_section = ""   # current TOML section name
@@ -142,19 +144,22 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
         key = array_match.group(1) or array_match.group(2) or array_match.group(3)
 
         # Determine if this is a dependency array we care about.
-        # Under [project], only the "dependencies" key is a dep array
-        # (skip classifiers, requires, etc.).
-        # Under [project.optional-dependencies] and [dependency-groups],
-        # any key is a dep group name.
-        # For all other sections, accept arrays whose key contains
-        # "dependencies" (catches tool.hatch.envs.*.dependencies,
-        # tool.pdm.dev-dependencies, etc.).
-        if current_section == _SECTION_PROJECT:
+        # - Must be inside a section (no bare top-level arrays).
+        # - Under [project], only the "dependencies" key is a dep array
+        #   (skip classifiers, requires, etc.).
+        # - Under [project.optional-dependencies] and [dependency-groups],
+        #   any key is a dep group name.
+        # - For all other sections, accept if "dependencies" appears in
+        #   the key OR the section name (catches tool.hatch.envs.*.dependencies,
+        #   tool.pdm.dev-dependencies, etc.).
+        if not current_section:
+            continue
+        elif current_section == _SECTION_PROJECT:
             if key != "dependencies":
                 continue
         elif current_section in (_SECTION_OPTIONAL, _SECTION_DEP_GROUPS):
             pass  # any key is a dep group
-        elif "dependencies" not in key:
+        elif "dependencies" not in key and "dependencies" not in current_section:
             continue
 
         # Find the content after the opening [

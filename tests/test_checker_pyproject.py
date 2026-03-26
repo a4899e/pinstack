@@ -181,6 +181,21 @@ class TestExtractDependencyArrays:
         assert "pytest==9.0.2" in deps
         assert "ruff>=0.15.0" in deps
 
+    def test_pdm_dev_dependencies(self):
+        """[tool.pdm.dev-dependencies] group arrays should be extracted."""
+        content = (
+            '[tool.pdm.dev-dependencies]\n'
+            'test = [\n'
+            '    "pytest>=8.3.0",\n'
+            '    "ruff==0.5.0",\n'
+            ']\n'
+        )
+        arrays = extract_dependency_arrays(content)
+        assert len(arrays) == 1
+        deps, label = arrays[0]
+        assert "pytest>=8.3.0" in deps
+        assert "ruff==0.5.0" in deps
+
     def test_tool_section_non_dep_key_ignored(self):
         """Arrays in tool sections whose key doesn't contain 'dependencies' are skipped."""
         content = (
@@ -215,16 +230,8 @@ class TestExtractDependencyArrays:
         assert total_deps == 0
 
     def test_no_section_header(self):
-        """A 'dependencies' array before any section header is still extracted."""
+        """A bare 'dependencies' array before any section header is ignored."""
         content = 'dependencies = [\n    "flask==2.3.2",\n]\n'
-        arrays = extract_dependency_arrays(content)
-        assert len(arrays) == 1
-        deps, label = arrays[0]
-        assert "flask==2.3.2" in deps
-
-    def test_non_dep_key_outside_project_ignored(self):
-        """Non-dependency arrays outside [project] are ignored."""
-        content = 'classifiers = [\n    "Development Status :: 3 - Alpha",\n]\n'
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 0
 
