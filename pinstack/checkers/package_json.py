@@ -10,8 +10,11 @@ from pinstack.core import Checker, Finding, FileIndex
 # Version prefixes that indicate a non-exact (unpinned) dependency.
 _UNPINNED_PREFIXES = ("^", "~", ">=", "<=", ">", "<")
 
-# Protocols and schemes that should never be flagged.
-_SAFE_PREFIXES = ("workspace:", "file:", "http://", "https://", "git+", "git://", "github:")
+# Local references that should not be flagged (resolved at install time).
+_SAFE_PREFIXES = ("workspace:", "file:")
+
+# URL-based sources that are not content-addressed and should be flagged.
+_URL_PREFIXES = ("http://", "https://", "git+", "git://", "github:")
 
 _DEP_SECTIONS = (
     "dependencies",
@@ -24,18 +27,20 @@ _DEP_SECTIONS = (
 _LOCK_FILES = frozenset(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
 
 
-def _is_unpinned(version: str) -> bool:
-    """Return True if the version string uses a range operator."""
+def _is_unpinned(version: str) -> tuple[bool, str]:
+    """Return (is_bad, reason) for a version string."""
     if not version or not isinstance(version, str):
-        return False
-    # Safe protocols are never flagged
+        return False, ""
     for safe in _SAFE_PREFIXES:
         if version.startswith(safe):
-            return False
+            return False, ""
+    for prefix in _URL_PREFIXES:
+        if version.startswith(prefix):
+            return True, "not content-addressed"
     for prefix in _UNPINNED_PREFIXES:
         if version.startswith(prefix):
-            return True
-    return False
+            return True, "unpinned version"
+    return False, ""
 
 
 def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
@@ -137,16 +142,17 @@ class PackageJsonChecker(Checker):
                     continue
                 has_deps = True
                 for pkg, version in sorted(deps.items()):
-                    if _is_unpinned(version):
+                    is_bad, reason = _is_unpinned(version)
+                    if is_bad:
+                        integrity = reason == "not content-addressed"
                         findings.append(Finding(
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            message=(
-                                "'{}' in {} has unpinned version '{}'; use an exact version".format(
-                                    pkg, section, version
-                                )
+                            message="'{}' in {} has {} '{}'; use an exact version".format(
+                                pkg, section, reason, version
                             ),
+                            integrity=integrity,
                         ))
 
             # Check for companion lock file

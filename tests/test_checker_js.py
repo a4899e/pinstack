@@ -55,10 +55,11 @@ class TestPackageJsonGood:
         msgs = [f.message for f in findings]
         assert not any("local-utils" in m for m in msgs), "file:../utils should not be flagged"
 
-    def test_url_version_not_flagged(self):
+    def test_url_version_flagged_as_not_content_addressed(self):
         findings = _check_fixture_dir(PackageJsonChecker(), "package_json/workspace")
-        msgs = [f.message for f in findings]
-        assert not any("remote-pkg" in m for m in msgs), "https:// URL version should not be flagged"
+        url_findings = [f for f in findings if "remote-pkg" in f.message]
+        assert len(url_findings) == 1, "https:// URL should be flagged as not content-addressed"
+        assert "not content-addressed" in url_findings[0].message
 
     def test_empty_index_no_findings(self):
         assert _check_empty(PackageJsonChecker()) == []
