@@ -64,8 +64,16 @@ class GitHubActionsChecker(Checker):
                     if ref.startswith("./"):
                         continue
 
-                    # Skip docker:// refs
+                    # docker:// refs must use @sha256: digest
                     if ref.startswith("docker://"):
+                        if "@sha256:" not in ref:
+                            findings.append(Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="docker action '{}' is not pinned with @sha256: digest".format(ref),
+                                integrity=True,
+                            ))
                         continue
 
                     # Check for @ separator

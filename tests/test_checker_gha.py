@@ -37,8 +37,8 @@ class TestGHAGood:
         msgs = [f.message for f in findings]
         assert not any("local-action" in m for m in msgs)
 
-    def test_docker_ref_skipped(self):
-        """docker:// refs should not be flagged."""
+    def test_docker_ref_with_digest_not_flagged(self):
+        """docker:// refs with @sha256: digest should not be flagged."""
         findings = _check("good")
         msgs = [f.message for f in findings]
         assert not any("docker://" in m for m in msgs)
@@ -51,13 +51,10 @@ class TestGHABad:
     def setup_method(self):
         self.findings = _check("bad")
 
-    def test_two_findings(self):
-        assert len(self.findings) == 2, "Expected 2 findings (@v4 tags), got {}: {}".format(
+    def test_three_findings(self):
+        assert len(self.findings) == 3, "Expected 3 findings (2 tag refs + 1 docker), got {}: {}".format(
             len(self.findings), [f.message for f in self.findings]
         )
-
-    def test_has_two_findings(self):
-        assert len(self.findings) == 2
 
     def test_checkout_v4_flagged(self):
         msgs = [f.message for f in self.findings]
@@ -66,6 +63,10 @@ class TestGHABad:
     def test_setup_python_v4_flagged(self):
         msgs = [f.message for f in self.findings]
         assert any("actions/setup-python" in m for m in msgs)
+
+    def test_docker_without_digest_flagged(self):
+        msgs = [f.message for f in self.findings]
+        assert any("docker://alpine" in m for m in msgs)
 
     def test_sha_pinned_not_flagged(self):
         """actions/cache with full SHA should not appear in findings."""

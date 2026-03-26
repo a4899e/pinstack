@@ -6,4 +6,4 @@ jobs:
     steps:
       - uses: actions/checkout@a81bbbf8298c0fa03ea29cdc473d45769f953675
       - uses: ./local-action
-      - uses: docker://alpine:3.18
+      - uses: docker://alpine:3.18@sha256:a8cbb8c0330bc2b8ce5e07f5e1643fa4b7f3c6c0d2d1a0c5e8f5b5e7c2c8a1d0
