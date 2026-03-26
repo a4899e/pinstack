@@ -56,9 +56,26 @@ def _check_line(raw_line: str) -> tuple:
         pkg = line[2:].strip()
         return False, True, False, pkg
 
-    # PEP 508 direct references: "package @ URL" — pinned by URL/tag/commit
+    # PEP 508 direct references: "package @ URL"
+    # Only accept if pinned to an immutable commit SHA.
     if " @ " in line:
-        return True, False, False, ""
+        spec = line.split("--hash")[0].strip()  # strip any --hash suffix
+        url_part = spec.split(" @ ", 1)[1].strip() if " @ " in spec else ""
+        pkg_name = spec.split(" @ ", 1)[0].strip() if " @ " in spec else spec
+        if "git+" in url_part or "git://" in url_part:
+            at_pos = url_part.rfind("@")
+            if at_pos >= 0:
+                ref = url_part[at_pos + 1:]
+                if re.match(r'^[0-9a-f]{40}$', ref):
+                    # Immutable commit SHA — check for --hash in original line
+                    if "--hash" not in line:
+                        return False, False, True, pkg_name  # missing hash warning
+                    return True, False, False, ""  # skip, fully pinned
+            return False, True, False, pkg_name  # mutable git ref
+        # Non-git URL ref
+        if "--hash" not in line:
+            return False, True, False, pkg_name  # not content-addressed
+        return True, False, False, ""  # has --hash, skip
 
     # URL lines are not content-addressed
     if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):

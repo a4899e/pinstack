@@ -284,6 +284,15 @@ pinstack . --exclude-dir vendor,third_party,checkouts
 Development setup:
 
 ```
+./scripts/setup-dev.sh
+source .venv/bin/activate
+```
+
+Or manually:
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 git config core.hooksPath .githooks
 ```

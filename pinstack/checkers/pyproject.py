@@ -326,9 +326,23 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     if not dep:
         return False, ""
 
-    # PEP 508 direct references: "package @ URL" — pinned by URL/tag/commit
+    # PEP 508 direct references: "package @ URL"
+    # Only accept if the URL pins to an immutable commit SHA.
+    # Mutable refs (@main, @v1.0, branch names) are not content-addressed.
     if " @ " in dep:
-        return False, ""
+        url_part = dep.split(" @ ", 1)[1].strip()
+        # git URLs: accept if pinned to a 40-char commit SHA after the last @
+        if "git+" in url_part or "git://" in url_part:
+            at_pos = url_part.rfind("@")
+            if at_pos >= 0:
+                ref = url_part[at_pos + 1:]
+                if re.match(r'^[0-9a-f]{40}$', ref):
+                    return False, ""
+            pkg_name = dep.split(" @ ", 1)[0].strip()
+            return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(pkg_name)
+        # Archive/HTTP URLs without hash verification
+        pkg_name = dep.split(" @ ", 1)[0].strip()
+        return True, "'{}' uses a URL reference without hash verification".format(pkg_name)
 
     m = _DEP_RE.match(dep)
     if not m:
