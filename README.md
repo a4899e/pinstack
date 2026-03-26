@@ -21,7 +21,7 @@ Helm charts, and more.
 **2. Zero dependencies**
 
 pinstack has no runtime dependencies outside the Python standard library. It
-runs on any system's `python3` (3.8 or later) without a virtual environment or
+runs on any system's `python3` (3.9 or later) without a virtual environment or
 any other setup step. This makes it practical to adopt in non-Python projects
 where adding a Python dependency tree would be unwelcome.
 
@@ -144,7 +144,7 @@ tools that support the standard.
 ## CI Integration
 
 pinstack is a standalone CLI tool, not a library. It works with any project
-regardless of language. Python 3.8+ is the only requirement, and it ships on
+regardless of language. Python 3.9+ is the only requirement, and it ships on
 virtually every CI runner out of the box.
 
 ### GitHub Actions
@@ -236,7 +236,7 @@ def build(c):
 
 ### Any Project
 
-pinstack runs anywhere Python 3.8+ is available. No virtual environment needed,
+pinstack runs anywhere Python 3.9+ is available. No virtual environment needed,
 no dependencies to install beyond pinstack itself.
 
 **With pip:**
@@ -293,7 +293,7 @@ You can also run these manually:
 
 ```
 invoke test      # run tests
-invoke build     # tests + ruff lint
+invoke build     # tests + ruff + pyright + bandit
 invoke clean     # remove .pyc, caches, build artifacts
 ```
 
