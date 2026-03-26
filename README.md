@@ -299,6 +299,8 @@ git config core.hooksPath .githooks
 
 ### Running Tests
 
+After running `./scripts/setup-dev.sh` (or the manual steps above):
+
 ```
 source .venv/bin/activate
 invoke test                              # run the full test suite
