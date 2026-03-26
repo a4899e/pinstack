@@ -6,7 +6,7 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
 
 # Matches a package specifier line.
 # Group 1: package name (including optional [extras])
@@ -55,6 +55,30 @@ def _check_line(raw_line: str) -> tuple:
     if line.startswith("-e"):
         pkg = line[2:].strip()
         return False, True, False, pkg
+
+    # PEP 508 direct references: "package @ URL"
+    # Only accept if pinned to an immutable commit SHA.
+    if " @ " in line:
+        spec = line.split("--hash")[0].strip()  # strip any --hash suffix
+        url_part = spec.split(" @ ", 1)[1].strip() if " @ " in spec else ""
+        pkg_name = spec.split(" @ ", 1)[0].strip() if " @ " in spec else spec
+        if "git+" in url_part or "git://" in url_part:
+            at_pos = url_part.rfind("@")
+            if at_pos >= 0:
+                ref = url_part[at_pos + 1:]
+                if re.match(r'^[0-9a-f]{40}$', ref):
+                    # Immutable commit SHA — check for --hash in original line
+                    if "--hash" not in line:
+                        return False, False, True, pkg_name  # missing hash warning
+                    return True, False, False, ""  # skip, fully pinned
+            return False, True, False, pkg_name  # mutable git ref
+        # Non-git URL ref: accept if --hash= present or URL fragment has valid hashes
+        if "--hash" in line:
+            return True, False, False, ""  # pip --hash flag present, skip
+        hash_errors = validate_url_fragment_hashes(url_part)
+        if not hash_errors:
+            return True, False, False, ""  # valid fragment hashes, skip
+        return False, True, False, pkg_name  # not content-addressed
 
     # URL lines are not content-addressed
     if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):

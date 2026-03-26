@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
 
 # Sections we care about (PEP 621)
 _SECTION_PROJECT = "project"
@@ -325,6 +325,29 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     dep = dep.strip()
     if not dep:
         return False, ""
+
+    # PEP 508 direct references: "package @ URL"
+    # Only accept if the URL pins to an immutable commit SHA.
+    # Mutable refs (@main, @v1.0, branch names) are not content-addressed.
+    if " @ " in dep:
+        url_part = dep.split(" @ ", 1)[1].strip()
+        # git URLs: accept if pinned to a 40-char commit SHA after the last @
+        if "git+" in url_part or "git://" in url_part:
+            at_pos = url_part.rfind("@")
+            if at_pos >= 0:
+                ref = url_part[at_pos + 1:]
+                if re.match(r'^[0-9a-f]{40}$', ref):
+                    return False, ""
+            pkg_name = dep.split(" @ ", 1)[0].strip()
+            return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(pkg_name)
+        # Archive/HTTP URLs: validate hash fragments
+        pkg_name = dep.split(" @ ", 1)[0].strip()
+        hash_errors = validate_url_fragment_hashes(url_part)
+        if not hash_errors:
+            return False, ""
+        return True, "'{}' uses a URL reference without valid hash verification ({})".format(
+            pkg_name, "; ".join(hash_errors),
+        )
 
     m = _DEP_RE.match(dep)
     if not m:

@@ -204,3 +204,88 @@ class TestRequirementsCheckerURLs:
             assert len(findings) == 2, "URL lines should be flagged"
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestRequirementsCheckerPEP508:
+    """PEP 508 direct references in requirements.txt."""
+
+    def _check(self, *lines):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmpdir, "requirements.txt"), "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+            checker = RequirementsChecker()
+            index = {tmpdir: {"requirements.txt"}}
+            return checker.check(index, tmpdir)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_mutable_git_tag_flagged(self):
+        """git+https://...@v0.3.0 is a movable tag — exactly 1 pin error."""
+        findings = self._check("lib @ git+https://github.com/example/lib.git@v0.3.0")
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
+        assert "not pinned" in findings[0].message or "mutable" in findings[0].message.lower()
+
+    def test_mutable_git_branch_flagged(self):
+        """git+https://...@main is a branch — exactly 1 pin error."""
+        findings = self._check("lib @ git+https://github.com/example/lib.git@main")
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
+
+    def test_immutable_git_sha_missing_hash(self):
+        """git+https://...@<sha> is immutable — no pin error, 1 missing --hash finding."""
+        findings = self._check(
+            "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
+        )
+        assert len(findings) == 1
+        assert "hash" in findings[0].message.lower()
+
+    def test_immutable_git_sha_with_hash_clean(self):
+        """Fully pinned: commit SHA + --hash — 0 findings."""
+        findings = self._check(
+            "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
+            " --hash=sha256:abcdef1234567890"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_without_hash_flagged(self):
+        """https:// URL without --hash or #sha256= — exactly 1 finding."""
+        findings = self._check("lib @ https://example.com/lib-1.0.tar.gz")
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
+
+    def test_archive_url_with_hash_clean(self):
+        """https:// URL with --hash — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz --hash=sha256:abcdef1234567890"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_fragment_hash_clean(self):
+        """https:// URL with #sha256= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha1_fragment_clean(self):
+        """https:// URL with #sha1= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha1=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha224_fragment_clean(self):
+        """https:// URL with #sha224= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha224=cccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_hash_after_subdirectory(self):
+        """#subdirectory=src&sha256=abc — hash not first in fragment."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        assert len(findings) == 0

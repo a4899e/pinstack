@@ -815,3 +815,81 @@ class TestPoetryDependencies:
             assert "internal_lib" in stale[0].message
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestPEP508DirectReferences:
+    """PEP 508 direct references: package @ URL."""
+
+    def _check_pep508(self, dep_line):
+        """Run pyproject checker on a single PEP 621 dependency."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            content = '[project]\nname = "test"\ndependencies = [\n    "{}",\n]\n'.format(dep_line)
+            with open(os.path.join(tmpdir, "pyproject.toml"), "w") as fh:
+                fh.write(content)
+            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
+                fh.write("")  # stub lock file
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            return [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_mutable_git_tag_flagged(self):
+        """git+https://...@v0.3.0 is a movable tag, should be flagged."""
+        findings = self._check_pep508("lib @ git+https://github.com/example/lib.git@v0.3.0")
+        assert len(findings) == 1
+        assert "mutable" in findings[0].message
+
+    def test_mutable_git_branch_flagged(self):
+        """git+https://...@main is a branch, should be flagged."""
+        findings = self._check_pep508("lib @ git+https://github.com/example/lib.git@main")
+        assert len(findings) == 1
+        assert "mutable" in findings[0].message
+
+    def test_git_no_ref_flagged(self):
+        """git+https://... with no @ ref at all, should be flagged."""
+        findings = self._check_pep508("lib @ git+https://github.com/example/lib.git")
+        assert len(findings) == 1
+
+    def test_immutable_git_sha_accepted(self):
+        """git+https://...@<40-char-sha> is immutable, should be accepted."""
+        findings = self._check_pep508(
+            "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_flagged(self):
+        """Plain https:// URL without hash is not content-addressed."""
+        findings = self._check_pep508("lib @ https://example.com/lib-1.0.tar.gz")
+        assert len(findings) == 1
+        assert "URL reference" in findings[0].message
+
+    def test_archive_url_with_fragment_hash_accepted(self):
+        """https:// URL with #sha256= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha1_fragment_accepted(self):
+        """https:// URL with #sha1= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha1=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_sha224_fragment_accepted(self):
+        """https:// URL with #sha224= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha224=cccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_hash_after_subdirectory(self):
+        """#subdirectory=src&sha256=abc — hash not first in fragment."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        assert len(findings) == 0

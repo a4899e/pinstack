@@ -284,15 +284,36 @@ pinstack . --exclude-dir vendor,third_party,checkouts
 Development setup:
 
 ```
+./scripts/setup-dev.sh
+source .venv/bin/activate
+```
+
+Or manually:
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 git config core.hooksPath .githooks
 ```
 
-The pre-commit hook runs `invoke build` (tests + lint) before each commit.
-You can also run these manually:
+### Running Tests
+
+After running `./scripts/setup-dev.sh` (or the manual steps above):
 
 ```
-invoke test      # run tests
+source .venv/bin/activate
+invoke test                              # run the full test suite
+python -m pytest tests/ -v               # or run pytest directly
+python -m pytest tests/test_checker_go.py # run a single test file
+```
+
+### Build Pipeline
+
+The pre-commit hook runs `invoke build` before each commit. You can also
+run it manually:
+
+```
 invoke build     # tests + ruff + pyright + bandit
 invoke clean     # remove .pyc, caches, build artifacts
 ```

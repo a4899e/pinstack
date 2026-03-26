@@ -13,6 +13,94 @@ EXCLUDED_DIRS = frozenset([
     "cdk.out", ".terraform", "target", "vendor",
 ])
 
+# --------------------------------------------------------------------------
+# URL fragment hash validation
+# --------------------------------------------------------------------------
+# pip supports hash verification via URL fragments in PEP 508 direct
+# references and requirements files. The fragment portion of a URL (after #)
+# can contain hash key-value pairs that pip uses to verify download integrity.
+#
+# The fragment syntax is not formally specified in the packaging standards,
+# but pip's implementation (documented in pip's changelog and secure-installs
+# guide) supports the following behaviors:
+#
+#   1. Hash algorithms are specified as key=value pairs in the fragment:
+#      https://example.com/lib.tar.gz#sha256=abcdef...
+#
+#   2. Multiple fragment fields can coexist, separated by &. The hash does
+#      not need to be the first field:
+#      https://example.com/lib.tar.gz#subdirectory=src&sha256=abcdef...
+#
+#   3. Multiple hash algorithms can appear in the same fragment:
+#      https://example.com/lib.tar.gz#sha256=abcdef...&sha512=012345...
+#      If the same algorithm appears multiple times, pip uses the first value.
+#
+#   4. The "subdirectory" key is also valid in fragments and should not be
+#      confused with a hash. Only recognized hash algorithm names count.
+#
+# We validate that each hash value is a hex string of the correct length for
+# its algorithm. A fragment with no valid hashes is treated as unhashed.
+#
+# Sources:
+#   - https://pip.pypa.io/en/stable/topics/secure-installs/
+#   - https://pip.pypa.io/en/stable/news/
+#   - https://packaging.python.org/en/latest/specifications/direct-url-data-structure/
+# --------------------------------------------------------------------------
+
+# Expected hex digest lengths per hash algorithm
+_HASH_ALGORITHMS = {
+    "md5": 32,
+    "sha1": 40,
+    "sha224": 56,
+    "sha256": 64,
+    "sha384": 96,
+    "sha512": 128,
+}
+
+_HEX_RE = __import__("re").compile(r'^[0-9a-fA-F]+$')
+
+
+def validate_url_fragment_hashes(url: str) -> list[str]:
+    """Validate hash key-value pairs in a URL fragment.
+
+    Returns a list of error strings. An empty list means all hashes are valid.
+    If the URL has no fragment or no hash fields, returns a single error
+    indicating no hash verification is present.
+    """
+    if "#" not in url:
+        return ["no hash fragment in URL"]
+
+    fragment = url.split("#", 1)[1]
+    fields = fragment.split("&")
+
+    # pip uses the first supported hash fragment it encounters for
+    # verification, ignoring all subsequent hash fields. Match that:
+    # find the first hash algorithm field and validate only that one.
+    for field in fields:
+        if "=" not in field:
+            continue
+        key, _, value = field.partition("=")
+        key = key.strip().lower()
+
+        if key not in _HASH_ALGORITHMS:
+            continue  # skip non-hash fields like subdirectory=
+
+        # This is the first hash field — validate it and return.
+        expected_len = _HASH_ALGORITHMS[key]
+
+        if not value:
+            return ["{} hash is empty".format(key)]
+        if not _HEX_RE.match(value):
+            return ["{} hash contains non-hex characters: {}".format(key, value)]
+        if len(value) != expected_len:
+            return ["{} hash has wrong length: expected {} hex chars, got {}".format(
+                key, expected_len, len(value),
+            )]
+        return []  # valid first hash
+
+    return ["no hash algorithm found in URL fragment"]
+
+
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_INDEX_SIZE = 384
 
