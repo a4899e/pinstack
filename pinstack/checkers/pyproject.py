@@ -1,4 +1,4 @@
-"""Pyproject checker: enforces == pinning in [project] dependencies and optional-dependencies."""
+"""Pyproject checker: enforces == pinning in [project] and [tool.poetry] dependencies."""
 
 from __future__ import annotations
 
@@ -7,9 +7,14 @@ import re
 
 from pinstack.core import Checker, Finding, FileIndex
 
-# Sections we care about
+# Sections we care about (PEP 621)
 _SECTION_PROJECT = "project"
 _SECTION_OPTIONAL = "project.optional-dependencies"
+
+# Poetry section prefixes
+_POETRY_DEPS_SECTION = "tool.poetry.dependencies"
+_POETRY_DEV_DEPS_SECTION = "tool.poetry.dev-dependencies"
+_POETRY_GROUP_DEPS_RE = re.compile(r'^tool\.poetry\.group\.[^.]+\.dependencies$')
 
 # Matches a TOML section header like [project] or [project.optional-dependencies]
 _SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]')
@@ -199,6 +204,116 @@ def _parse_array_items_from_line(text: str) -> list[str]:
     return tokens
 
 
+def _is_poetry_dep_section(section: str) -> bool:
+    """Return True if the section name is a Poetry dependency section."""
+    if section in (_POETRY_DEPS_SECTION, _POETRY_DEV_DEPS_SECTION):
+        return True
+    return bool(_POETRY_GROUP_DEPS_RE.match(section))
+
+
+# Matches a simple key = "value" TOML assignment (no array)
+_TOML_KV_RE = re.compile(r'^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+)$')
+
+# Matches an inline table: { version = "...", ... }
+_INLINE_TABLE_VERSION_RE = re.compile(r'version\s*=\s*["\']([^"\']+)["\']')
+
+# Operators that are NOT exact pins in Poetry
+# Acceptable: ==x.y.z or a bare x.y.z (no operator)
+_POETRY_BAD_CONSTRAINT_RE = re.compile(r'^(\^|~|>=|>(?!=)|<=|<(?!=)|!=|\*)')
+
+
+def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
+    """
+    Check whether a Poetry version constraint is an exact pin.
+
+    Returns (is_bad, reason_msg).
+    Acceptable:  ==x.y.z  or  x.y.z  (bare version, no operator — exact in Poetry)
+    Flagged:     ^x, ~x, >=x, >x, <x, <=x, !=x, *
+    """
+    v = version.strip()
+    if not v:
+        return True, "'{}' has no version constraint; use exact pinning".format(pkg)
+
+    if v == "*":
+        return True, "'{}' uses wildcard '*'; use exact pinning".format(pkg)
+
+    if v.startswith("=="):
+        # Must have something after ==
+        remainder = v[2:].strip()
+        if remainder:
+            return False, ""
+        return True, "'{}' has empty == constraint; use exact pinning".format(pkg)
+
+    if _POETRY_BAD_CONSTRAINT_RE.match(v):
+        return True, "'{}' uses '{}' instead of exact pinning; use ==<version> or a bare version".format(
+            pkg, v
+        )
+
+    # Bare version (no operator) — treat as exact in Poetry
+    return False, ""
+
+
+def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
+    """
+    Parse pyproject.toml content and extract Poetry-style dependency entries.
+
+    Returns a list of (package_name, version_string, line_number) tuples.
+    Only entries under Poetry dependency sections are returned:
+      - [tool.poetry.dependencies]
+      - [tool.poetry.dev-dependencies]
+      - [tool.poetry.group.<name>.dependencies]
+
+    The 'python' key is skipped (it is a Python version constraint, not a package dep).
+    Line numbers are 1-based.
+    """
+    results: list[tuple[str, str, int]] = []
+    current_section = ""
+    lines = content.splitlines()
+
+    for lineno, line in enumerate(lines, start=1):
+        stripped = line.strip()
+
+        # Section header
+        section_match = _SECTION_RE.match(stripped)
+        if section_match:
+            current_section = section_match.group(1).strip()
+            continue
+
+        if not _is_poetry_dep_section(current_section):
+            continue
+
+        # Skip blank lines and comments
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        kv_match = _TOML_KV_RE.match(stripped)
+        if not kv_match:
+            continue
+
+        pkg = kv_match.group(1).strip()
+        raw_value = kv_match.group(2).strip()
+
+        # Skip the 'python' key
+        if pkg.lower() == "python":
+            continue
+
+        # Inline table: { version = "^2.3", ... }
+        if raw_value.startswith("{"):
+            it_match = _INLINE_TABLE_VERSION_RE.search(raw_value)
+            if it_match:
+                version = it_match.group(1)
+                results.append((pkg, version, lineno))
+            # No version key in inline table — skip (e.g. git deps)
+            continue
+
+        # Simple string: "^2.28"
+        # Strip surrounding quotes
+        version = _extract_string_value(raw_value)
+        results.append((pkg, version, lineno))
+
+    return results
+
+
 def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     """
     Check if a dependency specifier is exactly == pinned.
@@ -290,7 +405,9 @@ def _extract_lock_file_names(full_path: str, lock_filename: str) -> set[str]:
 
 class PyprojectChecker(Checker):
     name = "pyproject"
-    description = "Checks pyproject.toml [project] dependencies for == exact pinning"
+    description = (
+        "Checks pyproject.toml [project] and [tool.poetry] dependencies for == exact pinning"
+    )
     patterns: list[str] = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
@@ -312,8 +429,9 @@ class PyprojectChecker(Checker):
                 continue
 
             dep_arrays = extract_dependency_arrays(content)
+            poetry_deps = extract_poetry_dependencies(content)
 
-            # Check each dep for == pinning
+            # Check each PEP 621 dep for == pinning
             has_deps = False
             for deps, label in dep_arrays:
                 if deps:
@@ -332,6 +450,19 @@ class PyprojectChecker(Checker):
                         message=msg,
                     ))
 
+            # Check each Poetry dep for exact pinning
+            for pkg, version, lineno in poetry_deps:
+                if pkg or version:
+                    has_deps = True
+                is_bad, msg = _check_poetry_version(pkg, version)
+                if is_bad:
+                    findings.append(Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=lineno,
+                        message=msg,
+                    ))
+
             # Check for companion lock file with hash verification
             found_lock_files = files & _LOCK_FILES
             if has_deps and not found_lock_files:
@@ -343,7 +474,8 @@ class PyprojectChecker(Checker):
                     integrity=True,
                 ))
             elif has_deps and found_lock_files:
-                # Cross-reference: check that every manifest dep appears in the lock file
+                # Cross-reference: check that every manifest dep appears in the lock file.
+                # Include both PEP 621 deps and Poetry deps in the manifest set.
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_lock_file_names(full_path, lock_filename)
                 if lock_names:
@@ -354,6 +486,10 @@ class PyprojectChecker(Checker):
                             normalized = _normalize_python_name(raw_name)
                             if normalized not in lock_names:
                                 missing.append(normalized)
+                    for pkg, version, lineno in poetry_deps:
+                        normalized = _normalize_python_name(pkg)
+                        if normalized not in lock_names:
+                            missing.append(normalized)
                     if missing:
                         findings.append(Finding(
                             checker=self.name,

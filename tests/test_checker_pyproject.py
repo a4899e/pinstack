@@ -551,3 +551,223 @@ class TestPyprojectLockFileCrossRef:
             assert cross_ref == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Poetry dependency tests
+# ---------------------------------------------------------------------------
+
+def _make_poetry_pyproject(tmpdir, content):
+    # type: (str, str) -> None
+    """Write pyproject.toml and a poetry.lock stub so the lock-file warning is suppressed."""
+    toml_path = os.path.join(tmpdir, "pyproject.toml")
+    lock_path = os.path.join(tmpdir, "poetry.lock")
+    with open(toml_path, "w") as fh:
+        fh.write(content)
+    # Minimal poetry.lock containing all package names referenced in content,
+    # so cross-reference checks don't fire. Tests that want to test cross-ref
+    # behaviour create their own lock files.
+    with open(lock_path, "w") as fh:
+        fh.write(
+            '[[package]]\nname = "requests"\nversion = "2.28.0"\n\n'
+            '[[package]]\nname = "flask"\nversion = "2.3.0"\n\n'
+            '[[package]]\nname = "boto3"\nversion = "1.35.0"\n\n'
+            '[[package]]\nname = "pytest"\nversion = "7.4.0"\n\n'
+            '[[package]]\nname = "coverage"\nversion = "7.3.0"\n\n'
+            '[[package]]\nname = "black"\nversion = "23.7.0"\n\n'
+        )
+
+
+class TestPoetryDependencies:
+    def test_poetry_deps_good(self):
+        """All == pinned Poetry deps produce 0 findings (excluding lock file finding)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'requests = "==2.28.0"\n'
+                'flask = "==2.3.0"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert pin_findings == [], "All == pins should produce 0 findings, got: {}".format(pin_findings)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_deps_caret(self):
+        """Caret constraint ^2.28 should be flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'requests = "^2.28"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "requests" in pin_findings[0].message
+
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_deps_tilde(self):
+        """Tilde constraint ~2.28 should be flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'flask = "~2.3"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "flask" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_deps_inline_table(self):
+        """{version = "^2.3"} inline table constraint should be flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'flask = {version = "^2.3", extras = ["async"]}\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "flask" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_deps_python_skipped(self):
+        """python = "^3.9" should NOT be flagged (python version constraint)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'requests = "==2.28.0"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            python_findings = [f for f in pin_findings if "python" in f.message.lower()]
+            assert python_findings == [], "python key should never be flagged"
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_dev_deps_checked(self):
+        """[tool.poetry.dev-dependencies] should be scanned."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                '\n'
+                '[tool.poetry.dev-dependencies]\n'
+                'pytest = "^7.0"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "pytest" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_group_deps_checked(self):
+        """[tool.poetry.group.test.dependencies] should be scanned."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                '\n'
+                '[tool.poetry.group.test.dependencies]\n'
+                'coverage = "^7.0"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "coverage" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_wildcard_flagged(self):
+        """Wildcard * constraint should be flagged."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'requests = "*"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert len(pin_findings) == 1
+            assert "requests" in pin_findings[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_exact_no_operator(self):
+        """"2.28.0" (no operator) is accepted as an exact pin in Poetry."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_poetry_pyproject(tmpdir, (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'requests = "2.28.0"\n'
+            ))
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            assert pin_findings == [], "bare version string is exact in Poetry, got: {}".format(pin_findings)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_poetry_cross_ref_deps_included(self):
+        """Poetry deps are included in the manifest set for lock-file cross-referencing."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            toml_content = (
+                '[tool.poetry.dependencies]\n'
+                'python = "^3.9"\n'
+                'black = "==23.7.0"\n'
+            )
+            toml_path = os.path.join(tmpdir, "pyproject.toml")
+            lock_path = os.path.join(tmpdir, "poetry.lock")
+            with open(toml_path, "w") as fh:
+                fh.write(toml_content)
+            # Lock file does NOT contain black — should trigger a stale warning
+            with open(lock_path, "w") as fh:
+                fh.write(
+                    '[[package]]\nname = "requests"\nversion = "2.28.0"\n'
+                )
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+            findings = checker.check(index, tmpdir)
+            stale = [f for f in findings if "stale" in f.message]
+            assert len(stale) == 1
+            assert "black" in stale[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
