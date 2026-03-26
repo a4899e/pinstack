@@ -75,6 +75,7 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
 
     errors: list[str] = []
     found_any_hash = False
+    seen_algorithms: set[str] = set()
 
     for field in fields:
         if "=" not in field:
@@ -84,6 +85,12 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
 
         if key not in _HASH_ALGORITHMS:
             continue  # skip non-hash fields like subdirectory=
+
+        # pip uses the first value per algorithm and ignores duplicates.
+        # Match that behavior: only validate the first occurrence.
+        if key in seen_algorithms:
+            continue
+        seen_algorithms.add(key)
 
         found_any_hash = True
         expected_len = _HASH_ALGORITHMS[key]

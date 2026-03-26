@@ -584,3 +584,16 @@ class TestValidateUrlFragmentHashes:
         url = "https://example.com/lib.tar.gz#SHA256=" + "a" * 64
         errors = validate_url_fragment_hashes(url)
         assert errors == []
+
+    def test_duplicate_algorithm_first_valid_second_bad(self):
+        """pip uses the first value per algorithm. Valid first + bad duplicate = accepted."""
+        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha256=bad"
+        errors = validate_url_fragment_hashes(url)
+        assert errors == []
+
+    def test_duplicate_algorithm_first_bad_second_valid(self):
+        """pip uses the first value. Bad first + valid duplicate = rejected."""
+        url = "https://example.com/lib.tar.gz#sha256=xyz&sha256=" + "a" * 64
+        errors = validate_url_fragment_hashes(url)
+        assert len(errors) == 1
+        assert "sha256" in errors[0]
