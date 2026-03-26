@@ -553,6 +553,8 @@ class TestPyprojectLockFileCheck:
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "requirements.txt"), "w") as fh:
+                fh.write("flask==2.3.2\n")
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
@@ -650,7 +652,55 @@ class TestPyprojectLockFileCrossRef:
             cross_ref = [f for f in findings if "stale" in f.message]
             assert len(cross_ref) == 1
             assert "flask" in cross_ref[0].message
-            assert "requirements.txt" in cross_ref[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_split_lockfiles_merged(self):
+        """Deps split across requirements.txt and requirements-dev.txt should all count."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            with open(os.path.join(tmpdir, "requirements.txt"), "w") as fh:
+                fh.write("flask==2.0\n")
+            with open(os.path.join(tmpdir, "requirements-dev.txt"), "w") as fh:
+                fh.write("requests==2.28.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements.txt", "requirements-dev.txt"}}
+            findings = checker.check(index, tmpdir)
+            cross_ref = [f for f in findings if "stale" in f.message]
+            assert cross_ref == [], "split lockfiles should satisfy cross-ref, got: {}".format(
+                [f.message for f in cross_ref]
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_requirements_dev_satisfies(self):
+        """requirements-dev.txt alone should satisfy the lock file check."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_TWO_DEPS)
+            with open(os.path.join(tmpdir, "requirements-dev.txt"), "w") as fh:
+                fh.write("flask==2.0\nrequests==2.28.0\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements-dev.txt"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_comment_only_requirements_not_a_lock_file(self):
+        """A comment-only requirements-dev.txt should not suppress the lock file warning."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "requirements-dev.txt"), "w") as fh:
+                fh.write("# this file only has comments\n# no packages\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements-dev.txt"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_warnings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

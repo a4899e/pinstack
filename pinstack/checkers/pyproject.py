@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 
@@ -395,13 +396,19 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     return True, "'{}' uses '{}' instead of '=='; use exact pinning".format(dep.split(";")[0].strip(), operator)
 
 
-# Lock files that provide hash verification for pyproject.toml dependencies
-_LOCK_FILES = frozenset([
-    "requirements.txt",  # pip-compile output with --generate-hashes
+# Lock files that provide hash verification for pyproject.toml dependencies.
+# requirements*.txt is matched dynamically via fnmatch (covers requirements.txt,
+# requirements-dev.txt, requirements-prod.txt, etc.).
+_LOCK_FILES_EXACT = frozenset([
     "poetry.lock",
     "pdm.lock",
     "uv.lock",
 ])
+
+
+def _is_requirements_lock(filename: str) -> bool:
+    """Return True if filename is a requirements*.txt lock file."""
+    return fnmatch.fnmatch(filename, "requirements*.txt")
 
 
 def _normalize_python_name(name: str) -> str:
@@ -436,7 +443,7 @@ def _extract_lock_file_names(full_path: str, lock_filename: str) -> set[str]:
     except OSError:
         return names
 
-    if lock_filename == "requirements.txt":
+    if _is_requirements_lock(lock_filename):
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or line.startswith("-"):
@@ -461,7 +468,7 @@ class PyprojectChecker(Checker):
     description = (
         "Checks pyproject.toml [project], [dependency-groups], and [tool.poetry] dependencies for == exact pinning"
     )
-    patterns: list[str] = ["pyproject.toml", "requirements.txt", "poetry.lock", "pdm.lock", "uv.lock"]
+    patterns: list[str] = ["pyproject.toml", "requirements*.txt", "poetry.lock", "pdm.lock", "uv.lock"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
@@ -516,9 +523,19 @@ class PyprojectChecker(Checker):
                         message=msg,
                     ))
 
-            # Check for companion lock file with hash verification
-            found_lock_files = files & _LOCK_FILES
-            if has_deps and not found_lock_files:
+            # Check for companion lock file with hash verification.
+            # Collect lock files.  For requirements*.txt, only count files
+            # that actually contain package entries (not comment-only stubs).
+            lock_names: set[str] = set()
+            req_candidates = sorted(f for f in files if _is_requirements_lock(f))
+            for req_file in req_candidates:
+                lock_names |= _extract_lock_file_names(full_path, req_file)
+            exact_lock_files = sorted(files & _LOCK_FILES_EXACT)
+            for lock_file in exact_lock_files:
+                lock_names |= _extract_lock_file_names(full_path, lock_file)
+            has_lock_files = bool(lock_names) or bool(exact_lock_files)
+
+            if has_deps and not has_lock_files:
                 findings.append(Finding(
                     checker=self.name,
                     path=rel_path,
@@ -526,11 +543,7 @@ class PyprojectChecker(Checker):
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
                     integrity=True,
                 ))
-            elif has_deps and found_lock_files:
-                # Cross-reference: check that every manifest dep appears in the lock file.
-                # Include both PEP 621 deps and Poetry deps in the manifest set.
-                lock_filename = sorted(found_lock_files)[0]
-                lock_names = _extract_lock_file_names(full_path, lock_filename)
+            elif has_deps and has_lock_files:
                 if lock_names:
                     missing: list[str] = []
                     for deps, label in dep_arrays:
@@ -548,8 +561,7 @@ class PyprojectChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            message="{} is stale: missing {} ({})".format(
-                                lock_filename,
+                            message="lock files are stale: missing {} ({})".format(
                                 "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
                                 ", ".join(sorted(missing)),
                             ),
