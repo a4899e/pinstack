@@ -221,27 +221,28 @@ class TestRequirementsCheckerPEP508:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_mutable_git_tag_flagged(self):
-        """lib @ git+https://...@v0.3.0 is a movable tag."""
+        """git+https://...@v0.3.0 is a movable tag — exactly 1 pin error."""
         findings = self._check("lib @ git+https://github.com/example/lib.git@v0.3.0")
-        assert len(findings) >= 1
-        assert any("lib" in f.message for f in findings)
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
+        assert "not pinned" in findings[0].message or "mutable" in findings[0].message.lower()
 
     def test_mutable_git_branch_flagged(self):
-        """lib @ git+https://...@main is a branch."""
+        """git+https://...@main is a branch — exactly 1 pin error."""
         findings = self._check("lib @ git+https://github.com/example/lib.git@main")
-        assert len(findings) >= 1
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
 
-    def test_immutable_git_sha_no_pin_error(self):
-        """lib @ git+https://...@<sha> is immutable — no pin error, but missing --hash."""
+    def test_immutable_git_sha_missing_hash(self):
+        """git+https://...@<sha> is immutable — no pin error, 1 missing --hash finding."""
         findings = self._check(
             "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
         )
-        # Should not have a pin error, but may have a hash warning
-        pin_errors = [f for f in findings if "mutable" in f.message or "not pinned" in f.message]
-        assert len(pin_errors) == 0
+        assert len(findings) == 1
+        assert "hash" in findings[0].message.lower()
 
     def test_immutable_git_sha_with_hash_clean(self):
-        """Fully pinned: commit SHA + --hash."""
+        """Fully pinned: commit SHA + --hash — 0 findings."""
         findings = self._check(
             "lib @ git+https://github.com/example/lib.git@a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4"
             " --hash=sha256:abcdef1234567890"
@@ -249,13 +250,21 @@ class TestRequirementsCheckerPEP508:
         assert len(findings) == 0
 
     def test_archive_url_without_hash_flagged(self):
-        """lib @ https://example.com/lib.tar.gz without --hash."""
+        """https:// URL without --hash or #sha256= — exactly 1 finding."""
         findings = self._check("lib @ https://example.com/lib-1.0.tar.gz")
-        assert len(findings) >= 1
+        assert len(findings) == 1
+        assert "lib" in findings[0].message
 
     def test_archive_url_with_hash_clean(self):
-        """lib @ https://example.com/lib.tar.gz with --hash is clean."""
+        """https:// URL with --hash — 0 findings."""
         findings = self._check(
             "lib @ https://example.com/lib-1.0.tar.gz --hash=sha256:abcdef1234567890"
+        )
+        assert len(findings) == 0
+
+    def test_archive_url_with_fragment_hash_clean(self):
+        """https:// URL with #sha256= fragment — 0 findings."""
+        findings = self._check(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha256=abcdef1234567890"
         )
         assert len(findings) == 0

@@ -865,3 +865,10 @@ class TestPEP508DirectReferences:
         findings = self._check_pep508("lib @ https://example.com/lib-1.0.tar.gz")
         assert len(findings) == 1
         assert "URL reference" in findings[0].message
+
+    def test_archive_url_with_fragment_hash_accepted(self):
+        """https:// URL with #sha256= fragment is hash-pinned."""
+        findings = self._check_pep508(
+            "lib @ https://example.com/lib-1.0.tar.gz#sha256=abcdef1234567890"
+        )
+        assert len(findings) == 0
