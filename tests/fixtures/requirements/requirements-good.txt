@@ -1,0 +1,6 @@
+flask==2.3.2 \
+    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+requests==2.31.0 \
+    --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+certifi==2023.7.22 \
+    --hash=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc

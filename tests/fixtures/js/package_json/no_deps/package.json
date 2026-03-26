@@ -1,0 +1,5 @@
+{
+  "name": "my-lib",
+  "version": "2.0.0",
+  "description": "A library with no dependencies"
+}

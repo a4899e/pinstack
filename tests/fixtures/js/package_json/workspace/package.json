@@ -1,0 +1,9 @@
+{
+  "name": "my-monorepo-pkg",
+  "version": "1.0.0",
+  "dependencies": {
+    "shared-lib": "workspace:*",
+    "local-utils": "file:../utils",
+    "remote-pkg": "https://github.com/org/pkg/archive/abc123.tar.gz"
+  }
+}

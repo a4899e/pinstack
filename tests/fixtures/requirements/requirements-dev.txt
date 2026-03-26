@@ -1,0 +1,4 @@
+pytest==7.4.0 \
+    --hash=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+black==23.7.0 \
+    --hash=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee

@@ -1,0 +1,4 @@
+package[extra]==1.0.0 \
+    --hash=sha256:abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca
+boto3[crt]==1.28.0 \
+    --hash=sha256:defdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefdefd

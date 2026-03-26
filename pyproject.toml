@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinstack"
+version = "0.1.0"
+description = "Supply-chain dependency pinning enforcement for every ecosystem"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [
+    { name = "smthmlk" },
+]
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2", "ruff==0.15.7", "pyright==1.1.408", "invoke==2.2.1", "jsonschema==4.26.0", "bandit==1.9.4"]
+
+[project.scripts]
+pinstack = "pinstack.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/a4899e/pinstack"
+Repository = "https://github.com/a4899e/pinstack"
+"Bug Tracker" = "https://github.com/a4899e/pinstack/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pinstack*"]
+
+[tool.pyright]
+pythonVersion = "3.9"
+typeCheckingMode = "basic"
+include = ["pinstack"]
+exclude = ["tests", "build", "dist", ".venv", "**/__pycache__"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
