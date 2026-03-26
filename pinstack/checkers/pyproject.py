@@ -326,6 +326,10 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     if not dep:
         return False, ""
 
+    # PEP 508 direct references: "package @ URL" — pinned by URL/tag/commit
+    if " @ " in dep:
+        return False, ""
+
     m = _DEP_RE.match(dep)
     if not m:
         # Can't parse: flag it

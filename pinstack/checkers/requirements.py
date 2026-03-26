@@ -56,6 +56,10 @@ def _check_line(raw_line: str) -> tuple:
         pkg = line[2:].strip()
         return False, True, False, pkg
 
+    # PEP 508 direct references: "package @ URL" — pinned by URL/tag/commit
+    if " @ " in line:
+        return True, False, False, ""
+
     # URL lines are not content-addressed
     if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):
         return False, True, False, line
