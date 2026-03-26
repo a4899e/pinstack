@@ -553,6 +553,8 @@ class TestPyprojectLockFileCheck:
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "requirements.txt"), "w") as fh:
+                fh.write("flask==2.3.2\n")
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "requirements.txt"}}
             findings = checker.check(index, tmpdir)
@@ -684,6 +686,21 @@ class TestPyprojectLockFileCrossRef:
             findings = checker.check(index, tmpdir)
             lock_warnings = [f for f in findings if "lock file" in f.message]
             assert lock_warnings == []
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_comment_only_requirements_not_a_lock_file(self):
+        """A comment-only requirements-dev.txt should not suppress the lock file warning."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "requirements-dev.txt"), "w") as fh:
+                fh.write("# this file only has comments\n# no packages\n")
+            checker = PyprojectChecker()
+            index = {tmpdir: {"pyproject.toml", "requirements-dev.txt"}}
+            findings = checker.check(index, tmpdir)
+            lock_warnings = [f for f in findings if "lock file" in f.message]
+            assert len(lock_warnings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

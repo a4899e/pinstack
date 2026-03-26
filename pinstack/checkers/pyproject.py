@@ -62,14 +62,13 @@ def _strip_inline_comment(line: str) -> str:
     return line
 
 
-def extract_dependency_arrays(content: str) -> list[tuple[list[str], str, str]]:
+def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
     """
     Parse pyproject.toml content with a state machine and extract dependency arrays.
 
-    Returns a list of (deps, label, section) tuples where:
-      deps    -- list of dependency specifier strings (quotes stripped)
-      label   -- human-readable label for the array (e.g. "dependencies", "dev")
-      section -- the TOML section name (e.g. "project", "tool.hatch.envs.default")
+    Returns a list of (deps, label) tuples where:
+      deps  -- list of dependency specifier strings (quotes stripped)
+      label -- human-readable label for the array (e.g. "dependencies", "dev")
 
     Under [project], only the "dependencies" key is returned (classifiers,
     requires, etc. are skipped).  Under [project.optional-dependencies] and
@@ -525,12 +524,18 @@ class PyprojectChecker(Checker):
                     ))
 
             # Check for companion lock file with hash verification.
-            # Collect all requirements*.txt files and exact-match lock files.
-            req_files = sorted(f for f in files if _is_requirements_lock(f))
+            # Collect lock files.  For requirements*.txt, only count files
+            # that actually contain package entries (not comment-only stubs).
+            lock_names: set[str] = set()
+            req_candidates = sorted(f for f in files if _is_requirements_lock(f))
+            for req_file in req_candidates:
+                lock_names |= _extract_lock_file_names(full_path, req_file)
             exact_lock_files = sorted(files & _LOCK_FILES_EXACT)
-            all_lock_files = req_files + exact_lock_files
+            for lock_file in exact_lock_files:
+                lock_names |= _extract_lock_file_names(full_path, lock_file)
+            has_lock_files = bool(lock_names) or bool(exact_lock_files)
 
-            if has_deps and not all_lock_files:
+            if has_deps and not has_lock_files:
                 findings.append(Finding(
                     checker=self.name,
                     path=rel_path,
@@ -538,13 +543,7 @@ class PyprojectChecker(Checker):
                     message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
                     integrity=True,
                 ))
-            elif has_deps and all_lock_files:
-                # Cross-reference: check that every manifest dep appears in
-                # at least one lock file.  Merge names from all lock files
-                # (supports split lockfiles like requirements.txt + requirements-dev.txt).
-                lock_names: set[str] = set()
-                for lock_filename in all_lock_files:
-                    lock_names |= _extract_lock_file_names(full_path, lock_filename)
+            elif has_deps and has_lock_files:
                 if lock_names:
                     missing: list[str] = []
                     for deps, label in dep_arrays:
