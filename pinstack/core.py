@@ -100,7 +100,8 @@ def build_index(root: str, patterns: set[str], max_depth: int = DEFAULT_MAX_DEPT
                 count += 1
                 if count >= max_index_size:
                     sys.stderr.write(
-                        "pinstack: index limit reached ({} files), scan may be incomplete\n".format(
+                        "pinstack: index limit reached ({} files), scan may be incomplete. "
+                        "Use --max-files to increase the limit.\n".format(
                             max_index_size
                         )
                     )

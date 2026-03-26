@@ -104,8 +104,8 @@ pinstack [PATH] [OPTIONS]
 | `--exclude NAME,NAME` | Skip these checkers (comma-separated). Mutually exclusive with `--check`. |
 | `--format FORMAT` | Output format: `text` (default) or `sarif`. |
 | `--exit-zero` | Always exit 0, even when findings are present. Useful for advisory-only runs. |
-| `--max-depth N` | Maximum directory depth to recurse into. Default: 4. |
-| `--max-files N` | Maximum number of files to index. Default: 384. |
+| `--max-depth N` | Maximum directory depth to recurse into. Default: 4. Increase for deep monorepos. |
+| `--max-files N` | Maximum number of dependency files to index. Default: 384. Increase for large monorepos. A warning is printed to stderr if the limit is reached. |
 | `--exclude-dir DIR,DIR` | Additional directory names to skip during traversal (comma-separated). |
 | `--list-checkers` | Print all available checkers and exit. |
 | `--version` | Print the pinstack version and exit. |
