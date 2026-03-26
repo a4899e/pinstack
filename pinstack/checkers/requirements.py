@@ -46,13 +46,19 @@ def _check_line(raw_line: str) -> tuple:
     if line.startswith("#"):
         return True, False, False, ""
 
-    # Skip options lines: --option, -r, -e, -c, -f, -i, -Z
-    if line.startswith("-"):
+    # Skip pip options: --option, -r (include), -c (constraint), -f, -i, -Z
+    # But NOT -e (editable installs) — those are real deps that bypass pinning
+    if line.startswith("--") or (line.startswith("-") and not line.startswith("-e")):
         return True, False, False, ""
 
-    # Skip URL lines
-    if line.startswith("http://") or line.startswith("https://"):
-        return True, False, False, ""
+    # Editable installs (-e) are not content-addressed
+    if line.startswith("-e"):
+        pkg = line[2:].strip()
+        return False, True, False, pkg
+
+    # URL lines are not content-addressed
+    if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):
+        return False, True, False, line
 
     # Strip inline comments (but NOT inside the specifier itself -- hashes are after whitespace)
     # We need the full line to detect --hash= later.

@@ -64,9 +64,11 @@ class TestRequirementsCheckerGood:
         findings = _check_fixture("requirements-comments_only.txt")
         assert findings == [], "Comments and options only should produce 0 findings"
 
-    def test_includes_only_no_findings(self):
+    def test_includes_r_skipped_e_flagged(self):
         findings = _check_fixture("requirements-includes.txt")
-        assert findings == [], "-r and -e lines should be skipped"
+        # -r lines are skipped, but -e (editable git install) is flagged
+        assert len(findings) == 1
+        assert "git+https" in findings[0].message
 
     def test_requirements_dev_filename_pattern(self):
         """requirements-dev.txt should be matched by the requirements*.txt pattern."""
@@ -188,8 +190,8 @@ class TestRequirementsCheckerPaths:
 
 
 class TestRequirementsCheckerURLs:
-    def test_url_lines_skipped(self):
-        """Lines starting with http:// should be skipped."""
+    def test_url_lines_flagged(self):
+        """URL deps are not content-addressed and should be flagged."""
         tmpdir = tempfile.mkdtemp()
         try:
             req_path = os.path.join(tmpdir, "requirements.txt")
@@ -199,6 +201,6 @@ class TestRequirementsCheckerURLs:
             checker = RequirementsChecker()
             index = {tmpdir: {"requirements.txt"}}
             findings = checker.check(index, tmpdir)
-            assert findings == [], "URL lines should be skipped"
+            assert len(findings) == 2, "URL lines should be flagged"
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
