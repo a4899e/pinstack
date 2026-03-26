@@ -1,6 +1,10 @@
 """Tests for dockerfile and compose checkers."""
 
+from __future__ import annotations
+
 import os
+import shutil
+import tempfile
 
 from pinstack.checkers.dockerfile import DockerfileChecker
 from pinstack.checkers.compose import ComposeChecker
@@ -96,6 +100,43 @@ class TestDockerfileMultistage:
         # golang@sha256: is pinned (ok), runner is a bare alias (skipped)
         assert findings == [], "Build stage aliases should be skipped, got: {}".format(
             [f.message for f in findings]
+        )
+
+
+class TestDockerfilePlatformFlag:
+    def _run(self, content):
+        # type: (str) -> list
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "Dockerfile")
+            with open(path, "w") as fh:
+                fh.write(content)
+            index = {d: {"Dockerfile"}}
+            return DockerfileChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_from_with_platform(self):
+        """FROM --platform=linux/amd64 python:3.11 should be flagged (no digest)."""
+        findings = self._run("FROM --platform=linux/amd64 python:3.11\n")
+        assert len(findings) == 1, (
+            "Expected 1 finding for unpinned platform image, got {}: {}".format(
+                len(findings), [f.message for f in findings]
+            )
+        )
+        assert "python:3.11" in findings[0].message
+        assert findings[0].checker == "dockerfile"
+
+    def test_from_with_platform_and_digest(self):
+        """FROM --platform=linux/amd64 python:3.11@sha256:abc... should produce 0 findings."""
+        findings = self._run(
+            "FROM --platform=linux/amd64 "
+            "python:3.11@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\n"
+        )
+        assert findings == [], (
+            "Digest-pinned platform image should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
