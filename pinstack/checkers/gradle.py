@@ -35,6 +35,35 @@ _DEP_RE = re.compile(
     r"""['"]((?P<group>[^'":\s]+):(?P<artifact>[^'":\s]+)(?::(?P<version>[^'"]*))?)['"]"""
 )
 
+# Matches Gradle map notation dependency declarations, e.g.:
+#   implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+#   testImplementation group: "org.junit", name: "junit", version: "4.13"
+# Fields may appear in any order; single or double quotes are supported.
+# Known limitation: version catalog references (e.g. implementation(libs.guava))
+# cannot be resolved without reading the TOML catalog file and are not flagged.
+_QUOTE = r"""['"]"""
+_MAP_FIELD = r"""(?:{key}\s*:\s*{q}(?P<{name}>[^'"]*){q})"""
+
+
+def _build_map_re() -> re.Pattern[str]:
+    configs_pat = "|".join(re.escape(c) for c in _CONFIGS)
+    # Build a pattern that captures group, name, and version from any field order.
+    # We use a single pattern with named groups; version is optional.
+    return re.compile(
+        r"""^\s*(?P<config>"""
+        + configs_pat
+        + r""")\s*"""
+        # Require group: and name: in any order, with version: optional
+        + r"""(?=.*\bgroup\s*:\s*['"][^'"]*['"])"""
+        + r"""(?=.*\bname\s*:\s*['"][^'"]*['"])"""
+        + r""".*\bgroup\s*:\s*['"](?P<map_group>[^'"]+)['"]"""
+        + r""".*\bname\s*:\s*['"](?P<map_artifact>[^'"]+)['"]"""
+        + r"""(?:.*\bversion\s*:\s*['"](?P<map_version>[^'"]*)['"])?"""
+    )
+
+
+_MAP_DEP_RE = _build_map_re()
+
 # Patterns that indicate a dynamic/bad version in the version segment
 _RANGE_RE = re.compile(r"[\[\]()]")
 
@@ -144,12 +173,19 @@ class GradleChecker(Checker):
 
                 for lineno, raw_line in enumerate(lines, start=1):
                     m = _DEP_RE.match(raw_line)
-                    if not m:
-                        continue
+                    if m:
+                        group = m.group("group") or ""
+                        artifact = m.group("artifact") or ""
+                        version = m.group("version")  # None if no version segment
+                    else:
+                        # Try map notation: implementation group: 'g', name: 'a', version: 'v'
+                        m = _MAP_DEP_RE.match(raw_line)
+                        if not m:
+                            continue
+                        group = m.group("map_group") or ""
+                        artifact = m.group("map_artifact") or ""
+                        version = m.group("map_version")  # None if no version field
 
-                    group = m.group("group") or ""
-                    artifact = m.group("artifact") or ""
-                    version = m.group("version")  # None if no version segment
                     coord = "{}:{}".format(group, artifact)
 
                     if version is None:

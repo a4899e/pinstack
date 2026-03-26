@@ -265,6 +265,43 @@ class TestGradleCrossRef:
         assert "org.apache.commons:commons-lang3" in cross_ref[0].message
 
 
+class TestGradleMapNotationPinned:
+    def test_map_notation_pinned_no_version_findings(self):
+        """Map-notation dep with a pinned version and a lockfile should produce 0 findings."""
+        findings = _check("map_notation_pinned")
+        version_findings = [
+            f for f in findings
+            if "version" in f.message.lower() or "dynamic" in f.message.lower()
+        ]
+        assert version_findings == [], (
+            "Pinned map-notation dep should produce 0 version findings, got: {}".format(
+                [f.message for f in version_findings]
+            )
+        )
+
+
+class TestGradleMapNotationDynamic:
+    def setup_method(self):
+        self.findings = _check("map_notation_dynamic")
+
+    def test_map_notation_dynamic_flagged(self):
+        """Map-notation dep with a dynamic version should produce 1 finding."""
+        assert len(self.findings) == 1, (
+            "Dynamic map-notation dep should produce 1 finding, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
+        )
+
+    def test_message_mentions_plus(self):
+        assert "+" in self.findings[0].message
+
+    def test_checker_name(self):
+        assert self.findings[0].checker == "gradle"
+
+    def test_has_line_number(self):
+        assert self.findings[0].line > 0
+
+
 class TestGradleNoGradle:
     def test_empty_index_no_findings(self):
         assert _check_empty() == []
