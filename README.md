@@ -285,9 +285,16 @@ Development setup:
 
 ```
 pip install -e ".[dev]"
-pytest
-ruff check .
-pyright
+git config core.hooksPath .githooks
+```
+
+The pre-commit hook runs `invoke build` (tests + lint) before each commit.
+You can also run these manually:
+
+```
+invoke test      # run tests
+invoke build     # tests + ruff lint
+invoke clean     # remove .pyc, caches, build artifacts
 ```
 
 ---
