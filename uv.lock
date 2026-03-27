@@ -165,7 +165,7 @@ build = [
     { name = "pytest", specifier = "==9.0.2" },
     { name = "pytest-randomly", specifier = "==4.0.1" },
     { name = "ruff", specifier = "==0.15.7" },
-    { name = "setuptools", specifier = ">=61.0" },
+    { name = "setuptools", specifier = "==82.0.1" },
 ]
 
 [[package]]
