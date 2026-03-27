@@ -8,10 +8,19 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-EXCLUDED_DIRS = frozenset([
-    ".git", "node_modules", ".venv", "venv", "__pycache__",
-    "cdk.out", ".terraform", "target", "vendor",
-])
+EXCLUDED_DIRS = frozenset(
+    [
+        ".git",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "cdk.out",
+        ".terraform",
+        "target",
+        "vendor",
+    ]
+)
 
 # --------------------------------------------------------------------------
 # URL fragment hash validation
@@ -57,7 +66,7 @@ _HASH_ALGORITHMS = {
     "sha512": 128,
 }
 
-_HEX_RE = __import__("re").compile(r'^[0-9a-fA-F]+$')
+_HEX_RE = __import__("re").compile(r"^[0-9a-fA-F]+$")
 
 
 def validate_url_fragment_hashes(url: str) -> list[str]:
@@ -93,9 +102,13 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
         if not _HEX_RE.match(value):
             return ["{} hash contains non-hex characters: {}".format(key, value)]
         if len(value) != expected_len:
-            return ["{} hash has wrong length: expected {} hex chars, got {}".format(
-                key, expected_len, len(value),
-            )]
+            return [
+                "{} hash has wrong length: expected {} hex chars, got {}".format(
+                    key,
+                    expected_len,
+                    len(value),
+                )
+            ]
         return []  # valid first hash
 
     return ["no hash algorithm found in URL fragment"]
@@ -111,16 +124,18 @@ FileIndex = dict[str, set[str]]
 @dataclass
 class Finding:
     checker: str
-    path: str       # relative path
-    line: int       # 1-based, 0 if N/A
+    path: str  # relative path
+    line: int  # 1-based, 0 if N/A
     message: str
-    integrity: bool = False  # True when finding is about missing hash/checksum/integrity
+    integrity: bool = (
+        False  # True when finding is about missing hash/checksum/integrity
+    )
 
 
 class Checker:
     name: str = ""
     description: str = ""
-    patterns: list[str] = []     # filenames or globs e.g. ["Dockerfile*", "*.dockerfile"]
+    patterns: list[str] = []  # filenames or globs e.g. ["Dockerfile*", "*.dockerfile"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         raise NotImplementedError
@@ -135,7 +150,11 @@ class CheckerRegistry:
 
     def get_all(self, exclude: Optional[list[str]] = None) -> list[Checker]:
         exclude_set = set(exclude) if exclude else set()
-        return [cls() for name, cls in sorted(self._checkers.items()) if name not in exclude_set]
+        return [
+            cls()
+            for name, cls in sorted(self._checkers.items())
+            if name not in exclude_set
+        ]
 
     def get_by_names(self, names: list[str]) -> list[Checker]:
         result = []
@@ -166,9 +185,17 @@ def _matches_any_pattern(filename: str, patterns: set[str]) -> bool:
     return False
 
 
-def build_index(root: str, patterns: set[str], max_depth: int = DEFAULT_MAX_DEPTH, max_index_size: int = DEFAULT_MAX_INDEX_SIZE, extra_exclude_dirs: Optional[set[str]] = None) -> FileIndex:
+def build_index(
+    root: str,
+    patterns: set[str],
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    max_index_size: int = DEFAULT_MAX_INDEX_SIZE,
+    extra_exclude_dirs: Optional[set[str]] = None,
+) -> FileIndex:
     """Single os.walk, filtered to only interesting files."""
-    excluded = EXCLUDED_DIRS | extra_exclude_dirs if extra_exclude_dirs else EXCLUDED_DIRS
+    excluded = (
+        EXCLUDED_DIRS | extra_exclude_dirs if extra_exclude_dirs else EXCLUDED_DIRS
+    )
     index: FileIndex = {}
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
@@ -208,12 +235,14 @@ def run_checkers(checkers: list[Checker], index: FileIndex, root: str) -> list[F
         try:
             results = checker.check(index, root)
         except Exception as exc:
-            results = [Finding(
-                checker=checker.name,
-                path="<internal>",
-                line=0,
-                message="Checker crashed: {}".format(exc),
-            )]
+            results = [
+                Finding(
+                    checker=checker.name,
+                    path="<internal>",
+                    line=0,
+                    message="Checker crashed: {}".format(exc),
+                )
+            ]
         findings.extend(results)
 
     # Sort by path then line
@@ -241,8 +270,10 @@ def format_text(findings: list[Finding]) -> str:
         summary = "0 findings"
     else:
         summary = "{} error{} in {} file{}".format(
-            count, "s" if count != 1 else "",
-            file_count, "s" if file_count != 1 else "",
+            count,
+            "s" if count != 1 else "",
+            file_count,
+            "s" if file_count != 1 else "",
         )
     lines.append("")
     lines.append(summary)

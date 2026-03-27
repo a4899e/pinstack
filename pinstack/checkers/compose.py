@@ -9,12 +9,14 @@ import re
 from pinstack.core import Checker, Finding, FileIndex
 
 # Matches lines like:   image: nginx:1.25
-_IMAGE_RE = re.compile(r'^\s*image:\s*(\S+)')
+_IMAGE_RE = re.compile(r"^\s*image:\s*(\S+)")
 
 
 class ComposeChecker(Checker):
     name = "compose"
-    description = "Checks docker-compose files for digest (@sha256:) pinning on image references"
+    description = (
+        "Checks docker-compose files for digest (@sha256:) pinning on image references"
+    )
     patterns: list[str] = [
         "docker-compose*.yml",
         "docker-compose*.yaml",
@@ -47,12 +49,16 @@ class ComposeChecker(Checker):
                     image = m.group(1)
 
                     if "@sha256:" not in image:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="image '{}' is not pinned with @sha256: digest".format(image),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="image '{}' is not pinned with @sha256: digest".format(
+                                    image
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

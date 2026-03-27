@@ -35,7 +35,7 @@ def _parse_gomod_deps(path: str) -> list[str]:
                 in_block = True
                 continue
             # Single-line: "require module version"
-            m = re.match(r'^require\s+(\S+)\s+', line)
+            m = re.match(r"^require\s+(\S+)\s+", line)
             if m:
                 deps.append(m.group(1))
 
@@ -83,13 +83,15 @@ class GoChecker(Checker):
 
             if not has_sum:
                 rel_path = os.path.relpath(os.path.join(dir_path, "go.mod"), root)
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message="go.mod has no corresponding go.sum; run 'go mod tidy'",
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message="go.mod has no corresponding go.sum; run 'go mod tidy'",
+                        integrity=True,
+                    )
+                )
                 continue
 
             # Both exist — check go.sum for h1: hashes
@@ -115,13 +117,17 @@ class GoChecker(Checker):
 
                 hash_field = parts[2]
                 if not hash_field.startswith("h1:"):
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_sum,
-                        line=lineno,
-                        message="go.sum entry '{}' is missing h1: hash".format(parts[0]),
-                        integrity=True,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_sum,
+                            line=lineno,
+                            message="go.sum entry '{}' is missing h1: hash".format(
+                                parts[0]
+                            ),
+                            integrity=True,
+                        )
+                    )
 
             # Cross-reference: every go.mod dep must appear in go.sum
             gomod_deps = _parse_gomod_deps(mod_path)
@@ -132,15 +138,19 @@ class GoChecker(Checker):
                 if dep not in gosum_modules and (dep + "/go.mod") not in gosum_modules:
                     missing.append(dep)
             if missing:
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_sum,
-                    line=0,
-                    message="go.sum is stale: missing {} ({})".format(
-                        "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                        ", ".join(sorted(missing)),
-                    ),
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_sum,
+                        line=0,
+                        message="go.sum is stale: missing {} ({})".format(
+                            "{} dependency".format(len(missing))
+                            if len(missing) == 1
+                            else "{} dependencies".format(len(missing)),
+                            ", ".join(sorted(missing)),
+                        ),
+                        integrity=True,
+                    )
+                )
 
         return findings

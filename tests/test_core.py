@@ -23,6 +23,7 @@ from pinstack.core import (
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
+
 class DummyChecker(Checker):
     name = "dummy"
     description = "A dummy checker for tests"
@@ -83,6 +84,7 @@ def _populate(base, structure):
 # Finding
 # ---------------------------------------------------------------------------
 
+
 class TestFinding:
     def test_finding_fields(self):
         f = Finding(
@@ -110,6 +112,7 @@ class TestFinding:
 # Checker base class
 # ---------------------------------------------------------------------------
 
+
 class TestChecker:
     def test_checker_has_name_description_patterns(self):
         c = DummyChecker()
@@ -128,6 +131,7 @@ class TestChecker:
             assert results[0].checker == "dummy"
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_checker_base_check_raises(self):
@@ -139,6 +143,7 @@ class TestChecker:
 # ---------------------------------------------------------------------------
 # CheckerRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestCheckerRegistry:
     def _make_registry(self):
@@ -211,6 +216,7 @@ class TestCheckerRegistry:
 # _matches_any_pattern
 # ---------------------------------------------------------------------------
 
+
 class TestMatchesAnyPattern:
     def test_matches_exact_name(self):
         assert _matches_any_pattern("requirements.txt", {"requirements.txt"})
@@ -233,6 +239,7 @@ class TestMatchesAnyPattern:
 # build_index
 # ---------------------------------------------------------------------------
 
+
 class TestBuildIndex:
     def test_build_index_empty_dir(self):
         root = tempfile.mkdtemp()
@@ -241,14 +248,17 @@ class TestBuildIndex:
             assert index == {}
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_finds_matching_files(self):
-        root = _make_tmpdir_tree({
-            "requirements.txt": "flask==2.0.0\n",
-            "README.md": "# hello\n",
-            "setup.py": "pass\n",
-        })
+        root = _make_tmpdir_tree(
+            {
+                "requirements.txt": "flask==2.0.0\n",
+                "README.md": "# hello\n",
+                "setup.py": "pass\n",
+            }
+        )
         try:
             index = build_index(root, {"requirements.txt"})
             assert root in index
@@ -257,16 +267,19 @@ class TestBuildIndex:
             assert "setup.py" not in index[root]
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_skips_excluded_dirs(self):
-        root = _make_tmpdir_tree({
-            ".git": {"requirements.txt": ""},
-            "node_modules": {"requirements.txt": ""},
-            "__pycache__": {"requirements.txt": ""},
-            ".venv": {"requirements.txt": ""},
-            "src": {"requirements.txt": "real\n"},
-        })
+        root = _make_tmpdir_tree(
+            {
+                ".git": {"requirements.txt": ""},
+                "node_modules": {"requirements.txt": ""},
+                "__pycache__": {"requirements.txt": ""},
+                ".venv": {"requirements.txt": ""},
+                "src": {"requirements.txt": "real\n"},
+            }
+        )
         try:
             index = build_index(root, {"requirements.txt"})
             # Only the src/ subdir file should appear
@@ -280,19 +293,22 @@ class TestBuildIndex:
             assert "requirements.txt" in index[src_dir]
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_respects_max_depth(self):
         # depth 0 = root, depth 1 = a/, depth 2 = a/b/, depth 3 = a/b/c/
-        root = _make_tmpdir_tree({
-            "requirements.txt": "root\n",          # depth 0 — should be found (depth < max_depth=2)
-            "a": {
-                "requirements.txt": "level1\n",    # depth 1 — should be found
-                "b": {
-                    "requirements.txt": "level2\n",  # depth 2 — should NOT be found (depth >= max_depth=2)
+        root = _make_tmpdir_tree(
+            {
+                "requirements.txt": "root\n",  # depth 0 — should be found (depth < max_depth=2)
+                "a": {
+                    "requirements.txt": "level1\n",  # depth 1 — should be found
+                    "b": {
+                        "requirements.txt": "level2\n",  # depth 2 — should NOT be found (depth >= max_depth=2)
+                    },
                 },
-            },
-        })
+            }
+        )
         try:
             index = build_index(root, {"requirements.txt"}, max_depth=2)
             all_files = []
@@ -305,6 +321,7 @@ class TestBuildIndex:
             assert os.path.join("a", "b", "requirements.txt") not in rel_files
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_respects_max_index_size(self, capsys):
@@ -320,15 +337,18 @@ class TestBuildIndex:
             assert "index limit" in captured.err
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_glob_patterns(self):
-        root = _make_tmpdir_tree({
-            "Dockerfile": "FROM ubuntu\n",
-            "Dockerfile.prod": "FROM ubuntu\n",
-            "Dockerfile.dev": "FROM ubuntu\n",
-            "docker-compose.yml": "version: '3'\n",
-        })
+        root = _make_tmpdir_tree(
+            {
+                "Dockerfile": "FROM ubuntu\n",
+                "Dockerfile.prod": "FROM ubuntu\n",
+                "Dockerfile.dev": "FROM ubuntu\n",
+                "docker-compose.yml": "version: '3'\n",
+            }
+        )
         try:
             index = build_index(root, {"Dockerfile*"})
             assert root in index
@@ -338,21 +358,25 @@ class TestBuildIndex:
             assert "docker-compose.yml" not in index[root]
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_multiple_dirs(self):
-        root = _make_tmpdir_tree({
-            "requirements.txt": "root\n",
-            "subdir": {
-                "requirements.txt": "sub\n",
-            },
-        })
+        root = _make_tmpdir_tree(
+            {
+                "requirements.txt": "root\n",
+                "subdir": {
+                    "requirements.txt": "sub\n",
+                },
+            }
+        )
         try:
             index = build_index(root, {"requirements.txt"})
             assert root in index
             assert os.path.join(root, "subdir") in index
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_default_max_depth_constant(self):
@@ -366,6 +390,7 @@ class TestBuildIndex:
 # run_checkers
 # ---------------------------------------------------------------------------
 
+
 class TestRunCheckers:
     def test_run_checkers_collects_findings(self):
         root = _make_tmpdir_tree({"dummy.txt": ""})
@@ -377,6 +402,7 @@ class TestRunCheckers:
             assert findings[0].checker == "dummy"
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_run_checkers_checker_crash(self):
@@ -391,6 +417,7 @@ class TestRunCheckers:
             assert "crashed" in f.message.lower() or "boom" in f.message
         finally:
             import shutil
+
             shutil.rmtree(root, ignore_errors=True)
 
     def test_run_checkers_empty_index(self):
@@ -420,6 +447,7 @@ class TestRunCheckers:
 # ---------------------------------------------------------------------------
 # format_text
 # ---------------------------------------------------------------------------
+
 
 class TestFormatText:
     def test_format_text_empty(self):
@@ -499,6 +527,7 @@ class TestFormatText:
 # validate_url_fragment_hashes
 # ---------------------------------------------------------------------------
 
+
 class TestValidateUrlFragmentHashes:
     def test_no_fragment(self):
         errors = validate_url_fragment_hashes("https://example.com/lib.tar.gz")
@@ -506,7 +535,9 @@ class TestValidateUrlFragmentHashes:
         assert "no hash fragment" in errors[0]
 
     def test_fragment_no_hash(self):
-        errors = validate_url_fragment_hashes("https://example.com/lib.tar.gz#subdirectory=src")
+        errors = validate_url_fragment_hashes(
+            "https://example.com/lib.tar.gz#subdirectory=src"
+        )
         assert len(errors) == 1
         assert "no hash algorithm" in errors[0]
 
@@ -571,7 +602,9 @@ class TestValidateUrlFragmentHashes:
 
     def test_first_hash_valid_second_ignored(self):
         """pip uses only the first hash field. Second hash (even if different algo) is ignored."""
-        url = "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 128
+        url = (
+            "https://example.com/lib.tar.gz#sha256=" + "a" * 64 + "&sha512=" + "b" * 128
+        )
         errors = validate_url_fragment_hashes(url)
         assert errors == []
 

@@ -36,7 +36,10 @@ SARIF_SCHEMA = {
                                 "properties": {
                                     "name": {"type": "string"},
                                     "version": {"type": "string"},
-                                    "informationUri": {"type": "string", "format": "uri"},
+                                    "informationUri": {
+                                        "type": "string",
+                                        "format": "uri",
+                                    },
                                     "rules": {
                                         "type": "array",
                                         "items": {
@@ -47,10 +50,12 @@ SARIF_SCHEMA = {
                                                 "shortDescription": {
                                                     "type": "object",
                                                     "required": ["text"],
-                                                    "properties": {"text": {"type": "string"}},
+                                                    "properties": {
+                                                        "text": {"type": "string"}
+                                                    },
                                                 },
                                             },
-                                        }
+                                        },
                                     },
                                 },
                             }
@@ -105,7 +110,7 @@ SARIF_SCHEMA = {
                                     },
                                 },
                             },
-                        }
+                        },
                     },
                 },
             },
@@ -118,8 +123,8 @@ SARIF_SCHEMA = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _finding(checker="requirements", path="req.txt", line=1,
-             message="missing pin"):
+
+def _finding(checker="requirements", path="req.txt", line=1, message="missing pin"):
     # type: (...) -> Finding
     return Finding(
         checker=checker,
@@ -138,6 +143,7 @@ def _parse(findings):
 # test_empty_findings
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyFindings:
     def test_empty_findings(self):
         data = _parse([])
@@ -149,6 +155,7 @@ class TestEmptyFindings:
 # ---------------------------------------------------------------------------
 # test_single_finding
 # ---------------------------------------------------------------------------
+
 
 class TestSingleFinding:
     def test_rule_id(self):
@@ -169,7 +176,10 @@ class TestSingleFinding:
     def test_location_uri(self):
         data = _parse([_finding(path="subdir/requirements.txt")])
         loc = data["runs"][0]["results"][0]["locations"][0]
-        assert loc["physicalLocation"]["artifactLocation"]["uri"] == "subdir/requirements.txt"
+        assert (
+            loc["physicalLocation"]["artifactLocation"]["uri"]
+            == "subdir/requirements.txt"
+        )
 
     def test_location_start_line(self):
         data = _parse([_finding(line=7)])
@@ -186,6 +196,7 @@ class TestSingleFinding:
 # ---------------------------------------------------------------------------
 # test_multiple_findings_same_checker
 # ---------------------------------------------------------------------------
+
 
 class TestMultipleFindingsSameChecker:
     def test_only_one_rule(self):
@@ -221,6 +232,7 @@ class TestMultipleFindingsSameChecker:
 # test_error_level
 # ---------------------------------------------------------------------------
 
+
 class TestErrorLevel:
     def test_error_level(self):
         data = _parse([_finding()])
@@ -231,6 +243,7 @@ class TestErrorLevel:
 # ---------------------------------------------------------------------------
 # test_line_zero_clamped
 # ---------------------------------------------------------------------------
+
 
 class TestLineZeroClamped:
     def test_line_zero_becomes_one(self):
@@ -247,6 +260,7 @@ class TestLineZeroClamped:
 # ---------------------------------------------------------------------------
 # test_schema_and_version
 # ---------------------------------------------------------------------------
+
 
 class TestSchemaAndVersion:
     def test_schema_url_present(self):
@@ -270,6 +284,7 @@ class TestSchemaAndVersion:
 # test_tool_name_and_version
 # ---------------------------------------------------------------------------
 
+
 class TestToolNameAndVersion:
     def test_tool_name_pinstack(self):
         data = _parse([])
@@ -290,6 +305,7 @@ class TestToolNameAndVersion:
 # ---------------------------------------------------------------------------
 # test_valid_json
 # ---------------------------------------------------------------------------
+
 
 class TestValidJson:
     def test_empty_is_valid_json(self):
@@ -317,6 +333,7 @@ class TestValidJson:
 # ---------------------------------------------------------------------------
 # test_multiple_checkers_multiple_rules
 # ---------------------------------------------------------------------------
+
 
 class TestMultipleCheckersMultipleRules:
     def test_two_checkers_two_rules(self):
@@ -370,6 +387,7 @@ class TestMultipleCheckersMultipleRules:
 # test_sarif_schema_validation
 # ---------------------------------------------------------------------------
 
+
 def _validate(findings):
     # type: (list) -> dict
     """Parse SARIF output and validate against the structural schema."""
@@ -381,9 +399,13 @@ def _validate(findings):
 
 def _integrity_finding(**kwargs):
     # type: (...) -> Finding
-    defaults = dict(checker="package_lock", path="package-lock.json", line=1,
-                    message="'lodash' is missing an integrity hash in package-lock.json",
-                    integrity=True)
+    defaults = dict(
+        checker="package_lock",
+        path="package-lock.json",
+        line=1,
+        message="'lodash' is missing an integrity hash in package-lock.json",
+        integrity=True,
+    )
     defaults.update(kwargs)
     return Finding(**defaults)
 
@@ -428,6 +450,7 @@ class TestSarifSchemaValidation:
 # ---------------------------------------------------------------------------
 # test_integrity_nist_message
 # ---------------------------------------------------------------------------
+
 
 class TestIntegrityNistMessage:
     """Verify NIST reference is appended to integrity findings and not to others."""

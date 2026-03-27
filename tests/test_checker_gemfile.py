@@ -34,7 +34,9 @@ class TestGemfileOnly:
         self.findings = _check("gemfile_only")
 
     def test_one_warning(self):
-        assert len(self.findings) == 1, "Gemfile without Gemfile.lock should produce 1 WARNING"
+        assert len(self.findings) == 1, (
+            "Gemfile without Gemfile.lock should produce 1 WARNING"
+        )
 
     def test_has_one_finding(self):
         assert len(self.findings) == 1

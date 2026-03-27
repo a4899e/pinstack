@@ -23,8 +23,10 @@ def _check_empty():
 class TestGoBoth:
     def test_both_files_no_findings(self):
         findings = _check("both")
-        assert findings == [], "go.mod + go.sum with h1: hashes should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "go.mod + go.sum with h1: hashes should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
@@ -53,8 +55,10 @@ class TestGoMissingHash:
         self.findings = _check("missing_hash")
 
     def test_has_finding(self):
-        assert len(self.findings) >= 1, "go.sum line without h1: should produce finding(s), got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) >= 1, (
+            "go.sum line without h1: should produce finding(s), got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_finding_mentions_h1(self):

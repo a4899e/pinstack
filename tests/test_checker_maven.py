@@ -23,8 +23,10 @@ def _check_empty():
 class TestMavenGoodPom:
     def test_good_pom_no_findings(self):
         findings = _check("good_pom")
-        assert findings == [], "All explicit versions should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "All explicit versions should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
@@ -33,8 +35,10 @@ class TestMavenMissingVersion:
         self.findings = _check("missing_version")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Missing <version> should produce 1 finding, got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Missing <version> should produce 1 finding, got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_message_mentions_version(self):
@@ -52,12 +56,17 @@ class TestMavenVersionRange:
         self.findings = _check("version_range")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Version range should produce 1 finding, got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Version range should produce 1 finding, got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_message_mentions_range(self):
-        assert "range" in self.findings[0].message.lower() or "[" in self.findings[0].message
+        assert (
+            "range" in self.findings[0].message.lower()
+            or "[" in self.findings[0].message
+        )
 
     def test_checker_name(self):
         assert self.findings[0].checker == "maven"
@@ -71,8 +80,10 @@ class TestMavenLatestVersion:
         self.findings = _check("latest_version")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "LATEST version should produce 1 finding, got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "LATEST version should produce 1 finding, got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_message_mentions_latest(self):
@@ -87,8 +98,10 @@ class TestMavenReleaseVersion:
         self.findings = _check("release_version")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "RELEASE version should produce 1 finding, got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "RELEASE version should produce 1 finding, got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_message_mentions_release(self):
@@ -103,8 +116,10 @@ class TestMavenSnapshotVersion:
         self.findings = _check("snapshot_version")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "SNAPSHOT version should produce 1 finding, got: {}".format(
-            [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "SNAPSHOT version should produce 1 finding, got: {}".format(
+                [f.message for f in self.findings]
+            )
         )
 
     def test_message_mentions_snapshot(self):

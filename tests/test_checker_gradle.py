@@ -24,8 +24,10 @@ class TestGradleGood:
     def test_good_build_gradle_no_findings(self):
         # good/ has both build.gradle and gradle.lockfile with pinned versions
         findings = _check("good")
-        assert findings == [], "Pinned deps with lockfile should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "Pinned deps with lockfile should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
@@ -35,7 +37,11 @@ class TestGradleDynamicVersionPlus:
 
     def test_one_version_finding(self):
         # dynamic_plus has gradle.lockfile so no lock finding; 1 dynamic version finding
-        version_findings = [f for f in self.findings if "+" in f.message or "dynamic" in f.message.lower()]
+        version_findings = [
+            f
+            for f in self.findings
+            if "+" in f.message or "dynamic" in f.message.lower()
+        ]
         assert len(version_findings) == 1, (
             "31.+ dynamic version should produce 1 finding, got: {}".format(
                 [f.message for f in self.findings]
@@ -85,7 +91,10 @@ class TestGradleVersionRange:
         )
 
     def test_message_mentions_range(self):
-        assert "range" in self.findings[0].message.lower() or "[" in self.findings[0].message
+        assert (
+            "range" in self.findings[0].message.lower()
+            or "[" in self.findings[0].message
+        )
 
     def test_checker_name(self):
         assert self.findings[0].checker == "gradle"
@@ -173,9 +182,12 @@ class TestGradleWithLockfile:
 class TestGradleCrossRef:
     """Cross-reference: build.gradle pinned deps must all appear in gradle.lockfile."""
 
-    def _make_index(self, build_gradle_name, build_gradle_content, lockfile_content=None):
+    def _make_index(
+        self, build_gradle_name, build_gradle_content, lockfile_content=None
+    ):
         # type: (str, str, str) -> list
         import tempfile
+
         d = tempfile.mkdtemp()
         build_file = os.path.join(d, build_gradle_name)
         with open(build_file, "w") as fh:
@@ -191,9 +203,7 @@ class TestGradleCrossRef:
 
     def test_dep_in_build_gradle_missing_from_lockfile(self):
         build_gradle = (
-            "dependencies {\n"
-            "    implementation 'com.google.guava:guava:31.1-jre'\n"
-            "}\n"
+            "dependencies {\n    implementation 'com.google.guava:guava:31.1-jre'\n}\n"
         )
         lockfile = (
             "# Gradle lock file\n"
@@ -210,9 +220,7 @@ class TestGradleCrossRef:
 
     def test_dep_in_build_gradle_present_in_lockfile(self):
         build_gradle = (
-            "dependencies {\n"
-            "    implementation 'com.google.guava:guava:31.1-jre'\n"
-            "}\n"
+            "dependencies {\n    implementation 'com.google.guava:guava:31.1-jre'\n}\n"
         )
         lockfile = (
             "# Gradle lock file\n"
@@ -221,15 +229,15 @@ class TestGradleCrossRef:
         )
         findings = self._make_index("build.gradle", build_gradle, lockfile)
         cross_ref = [f for f in findings if "stale" in f.message]
-        assert cross_ref == [], "Dep present in lockfile — expected no cross-ref findings, got: {}".format(
-            [f.message for f in findings]
+        assert cross_ref == [], (
+            "Dep present in lockfile — expected no cross-ref findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_kotlin_dsl_cross_ref(self):
         build_gradle_kts = (
-            "dependencies {\n"
-            "    implementation(\"com.google.guava:guava:31.1-jre\")\n"
-            "}\n"
+            'dependencies {\n    implementation("com.google.guava:guava:31.1-jre")\n}\n'
         )
         lockfile = (
             "# Gradle lock file\n"
@@ -238,8 +246,10 @@ class TestGradleCrossRef:
         )
         findings = self._make_index("build.gradle.kts", build_gradle_kts, lockfile)
         cross_ref = [f for f in findings if "stale" in f.message]
-        assert len(cross_ref) == 1, "Expected 1 cross-ref finding for Kotlin DSL, got: {}".format(
-            [f.message for f in findings]
+        assert len(cross_ref) == 1, (
+            "Expected 1 cross-ref finding for Kotlin DSL, got: {}".format(
+                [f.message for f in findings]
+            )
         )
         assert "com.google.guava:guava" in cross_ref[0].message
 
@@ -258,8 +268,10 @@ class TestGradleCrossRef:
         )
         findings = self._make_index("build.gradle", build_gradle, lockfile)
         cross_ref = [f for f in findings if "stale" in f.message]
-        assert len(cross_ref) == 1, "Expected 1 summary cross-ref finding, got: {}".format(
-            [f.message for f in findings]
+        assert len(cross_ref) == 1, (
+            "Expected 1 summary cross-ref finding, got: {}".format(
+                [f.message for f in findings]
+            )
         )
         assert "org.slf4j:slf4j-api" in cross_ref[0].message
         assert "org.apache.commons:commons-lang3" in cross_ref[0].message
@@ -270,7 +282,8 @@ class TestGradleMapNotationPinned:
         """Map-notation dep with a pinned version and a lockfile should produce 0 findings."""
         findings = _check("map_notation_pinned")
         version_findings = [
-            f for f in findings
+            f
+            for f in findings
             if "version" in f.message.lower() or "dynamic" in f.message.lower()
         ]
         assert version_findings == [], (

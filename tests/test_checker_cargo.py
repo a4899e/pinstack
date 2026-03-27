@@ -22,8 +22,10 @@ def _check_empty():
 class TestCargoGood:
     def test_all_checksums_no_findings(self):
         findings = _check("good")
-        assert findings == [], "All registry packages with checksum should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "All registry packages with checksum should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_empty_index_no_findings(self):
@@ -35,8 +37,10 @@ class TestCargoBad:
         self.findings = _check("bad")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for tokio missing checksum, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for tokio missing checksum, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_has_one_finding(self):
@@ -59,8 +63,10 @@ class TestCargoLocalCrate:
     def test_local_crate_no_source_skipped(self):
         """Local crates (no source =) should not produce findings."""
         findings = _check("local")
-        assert findings == [], "Local path crates should not be flagged, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "Local path crates should not be flagged, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 

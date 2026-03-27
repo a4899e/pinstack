@@ -13,13 +13,13 @@ from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_has
 # Group 2: operator (==, >=, ~=, >, <, !=, <=, ~) -- absent means bare name
 # Group 3: version string -- absent means bare name
 _SPECIFIER_RE = re.compile(
-    r'^([A-Za-z0-9_.\-]+(?:\[[A-Za-z0-9_.,\s]+\])?)'  # name + optional extras
-    r'\s*'
-    r'(==|!=|~=|>=|<=|>|<|~)?'                          # optional operator
-    r'\s*'
-    r'([^\s;#\\]*)'                                      # optional version
-    r'\s*'
-    r'(.*)'                                               # remainder (hashes, options, etc.)
+    r"^([A-Za-z0-9_.\-]+(?:\[[A-Za-z0-9_.,\s]+\])?)"  # name + optional extras
+    r"\s*"
+    r"(==|!=|~=|>=|<=|>|<|~)?"  # optional operator
+    r"\s*"
+    r"([^\s;#\\]*)"  # optional version
+    r"\s*"
+    r"(.*)"  # remainder (hashes, options, etc.)
 )
 
 
@@ -65,8 +65,8 @@ def _check_line(raw_line: str) -> tuple:
         if "git+" in url_part or "git://" in url_part:
             at_pos = url_part.rfind("@")
             if at_pos >= 0:
-                ref = url_part[at_pos + 1:]
-                if re.match(r'^[0-9a-f]{40}$', ref):
+                ref = url_part[at_pos + 1 :]
+                if re.match(r"^[0-9a-f]{40}$", ref):
                     # Immutable commit SHA — VCS deps are built from source,
                     # so pip cannot produce --hash for them.  The SHA pin is
                     # sufficient for integrity verification.
@@ -81,7 +81,11 @@ def _check_line(raw_line: str) -> tuple:
         return False, True, False, pkg_name  # not content-addressed
 
     # URL lines are not content-addressed
-    if line.startswith("http://") or line.startswith("https://") or line.startswith("git+"):
+    if (
+        line.startswith("http://")
+        or line.startswith("https://")
+        or line.startswith("git+")
+    ):
         return False, True, False, line
 
     # Strip inline comments (but NOT inside the specifier itself -- hashes are after whitespace)
@@ -89,7 +93,9 @@ def _check_line(raw_line: str) -> tuple:
     # Remove only a trailing # comment that is NOT part of a hash
     # Hashes look like:  --hash=sha256:abc123
     # Safe to strip everything after first ' #' that follows whitespace
-    full_for_hash = line  # keep original (with possible inline comment stripped for hash check)
+    full_for_hash = (
+        line  # keep original (with possible inline comment stripped for hash check)
+    )
 
     # Extract the package specifier part (everything before the first space or backslash)
     # The specifier is the leading non-whitespace token
@@ -111,7 +117,7 @@ def _check_line(raw_line: str) -> tuple:
         if has_hash:
             return False, False, False, pkg_name  # clean
         else:
-            return False, False, True, pkg_name   # missing hash -> WARNING
+            return False, False, True, pkg_name  # missing hash -> WARNING
     else:
         # Missing == pin -> ERROR
         return False, True, False, pkg_name
@@ -119,7 +125,9 @@ def _check_line(raw_line: str) -> tuple:
 
 class RequirementsChecker(Checker):
     name = "requirements"
-    description = "Checks requirements*.txt files for == pinning and --hash= integrity markers"
+    description = (
+        "Checks requirements*.txt files for == pinning and --hash= integrity markers"
+    )
     patterns: list[str] = ["requirements*.txt"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
@@ -164,19 +172,27 @@ class RequirementsChecker(Checker):
                     if skip:
                         continue
                     if pin_error:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=start_lineno,
-                            message="'{}' is not pinned with ==; use package==version".format(pkg_name),
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=start_lineno,
+                                message="'{}' is not pinned with ==; use package==version".format(
+                                    pkg_name
+                                ),
+                            )
+                        )
                     elif hash_warn:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=start_lineno,
-                            message="'{}' is pinned with == but missing --hash=; add integrity hash".format(pkg_name),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=start_lineno,
+                                message="'{}' is pinned with == but missing --hash=; add integrity hash".format(
+                                    pkg_name
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

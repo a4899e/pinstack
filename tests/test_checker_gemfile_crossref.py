@@ -40,15 +40,18 @@ BUNDLED WITH
 class TestDepInGemfileMissingFromLock:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Gemfile": (
-                'source "https://rubygems.org"\n'
-                '\n'
-                'gem "rails", "7.0.8"\n'
-                'gem "sidekiq"\n'
-            ),
-            "Gemfile.lock": GEMFILE_LOCK_RAILS_ONLY,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Gemfile": (
+                    'source "https://rubygems.org"\n'
+                    "\n"
+                    'gem "rails", "7.0.8"\n'
+                    'gem "sidekiq"\n'
+                ),
+                "Gemfile.lock": GEMFILE_LOCK_RAILS_ONLY,
+            },
+        )
         self.findings = GemfileChecker().check(index, self.tmpdir)
 
     def test_dep_in_gemfile_missing_from_lock(self):
@@ -78,15 +81,18 @@ class TestDepInGemfileMissingFromLock:
 class TestDepInGemfilePresentInLock:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Gemfile": (
-                'source "https://rubygems.org"\n'
-                '\n'
-                'gem "rails", "7.0.8"\n'
-                'gem "puma", "6.4.0"\n'
-            ),
-            "Gemfile.lock": GEMFILE_LOCK_RAILS_PUMA,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Gemfile": (
+                    'source "https://rubygems.org"\n'
+                    "\n"
+                    'gem "rails", "7.0.8"\n'
+                    'gem "puma", "6.4.0"\n'
+                ),
+                "Gemfile.lock": GEMFILE_LOCK_RAILS_PUMA,
+            },
+        )
         self.findings = GemfileChecker().check(index, self.tmpdir)
 
     def test_dep_in_gemfile_present_in_lock(self):
@@ -103,16 +109,19 @@ class TestGemfileVariousFormats:
 
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Gemfile": (
-                'source "https://rubygems.org"\n'
-                '\n'
-                'gem "rails", "7.0"\n'          # double quotes with version
-                "gem 'sidekiq'\n"                # single quotes no version
-                "gem 'puma', '~> 6.0'\n"         # single quotes with constraint
-            ),
-            "Gemfile.lock": GEMFILE_LOCK_RAILS_PUMA,  # has rails and puma, not sidekiq
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Gemfile": (
+                    'source "https://rubygems.org"\n'
+                    "\n"
+                    'gem "rails", "7.0"\n'  # double quotes with version
+                    "gem 'sidekiq'\n"  # single quotes no version
+                    "gem 'puma', '~> 6.0'\n"  # single quotes with constraint
+                ),
+                "Gemfile.lock": GEMFILE_LOCK_RAILS_PUMA,  # has rails and puma, not sidekiq
+            },
+        )
         self.findings = GemfileChecker().check(index, self.tmpdir)
 
     def test_gemfile_various_formats(self):
@@ -126,12 +135,16 @@ class TestGemfileVariousFormats:
     def test_double_quoted_dep_found(self):
         cross_ref = [f for f in self.findings if "stale" in f.message]
         msgs = [f.message for f in cross_ref]
-        assert not any("rails" in m for m in msgs), "rails (double-quoted) should be found in lock"
+        assert not any("rails" in m for m in msgs), (
+            "rails (double-quoted) should be found in lock"
+        )
 
     def test_single_quoted_with_constraint_found(self):
         cross_ref = [f for f in self.findings if "stale" in f.message]
         msgs = [f.message for f in cross_ref]
-        assert not any("puma" in m for m in msgs), "puma (single-quoted with constraint) should be found in lock"
+        assert not any("puma" in m for m in msgs), (
+            "puma (single-quoted with constraint) should be found in lock"
+        )
 
     def test_only_one_missing(self):
         cross_ref = [f for f in self.findings if "stale" in f.message]

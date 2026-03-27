@@ -44,20 +44,26 @@ class TerraformChecker(Checker):
                     if line.startswith('provider "') and line.endswith("{"):
                         # Flush previous provider if any
                         if in_provider and provider_name is not None and not has_h1:
-                            findings.append(Finding(
-                                checker="terraform",
-                                path=rel_path,
-                                line=provider_line,
-                                message="provider '{}' is missing h1: hash in lock file".format(provider_name),
-                                integrity=True,
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker="terraform",
+                                    path=rel_path,
+                                    line=provider_line,
+                                    message="provider '{}' is missing h1: hash in lock file".format(
+                                        provider_name
+                                    ),
+                                    integrity=True,
+                                )
+                            )
                         in_provider = True
                         in_hashes = False
                         has_h1 = False
                         provider_line = lineno
                         # Extract short name from "registry.terraform.io/hashicorp/aws"
                         try:
-                            raw = line.split('"')[1]  # registry.terraform.io/hashicorp/aws
+                            raw = line.split('"')[
+                                1
+                            ]  # registry.terraform.io/hashicorp/aws
                             provider_name = raw.split("/")[-1]
                         except IndexError:
                             provider_name = line
@@ -70,13 +76,17 @@ class TerraformChecker(Checker):
                     if line == "}":
                         in_hashes = False
                         if provider_name is not None and not has_h1:
-                            findings.append(Finding(
-                                checker="terraform",
-                                path=rel_path,
-                                line=provider_line,
-                                message="provider '{}' is missing h1: hash in lock file".format(provider_name),
-                                integrity=True,
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker="terraform",
+                                    path=rel_path,
+                                    line=provider_line,
+                                    message="provider '{}' is missing h1: hash in lock file".format(
+                                        provider_name
+                                    ),
+                                    integrity=True,
+                                )
+                            )
                         in_provider = False
                         provider_name = None
                         has_h1 = False
@@ -95,12 +105,16 @@ class TerraformChecker(Checker):
 
                 # Flush last provider block if file ended without closing brace
                 if in_provider and provider_name is not None and not has_h1:
-                    findings.append(Finding(
-                        checker="terraform",
-                        path=rel_path,
-                        line=provider_line,
-                        message="provider '{}' is missing h1: hash in lock file".format(provider_name),
-                        integrity=True,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker="terraform",
+                            path=rel_path,
+                            line=provider_line,
+                            message="provider '{}' is missing h1: hash in lock file".format(
+                                provider_name
+                            ),
+                            integrity=True,
+                        )
+                    )
 
         return findings

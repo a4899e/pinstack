@@ -10,7 +10,9 @@ from pinstack.core import Checker, Finding, FileIndex
 
 class HelmChecker(Checker):
     name = "helm"
-    description = "Checks Chart.yaml for missing Chart.lock and Chart.lock for missing digests"
+    description = (
+        "Checks Chart.yaml for missing Chart.lock and Chart.lock for missing digests"
+    )
     patterns: list[str] = ["Chart.yaml", "Chart.lock"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
@@ -35,19 +37,23 @@ class HelmChecker(Checker):
                 has_dependencies = self._has_dependencies(chart_yaml_path)
 
                 if has_dependencies and not has_chart_lock:
-                    findings.append(Finding(
-                        checker="helm",
-                        path=chart_yaml_rel,
-                        line=0,
-                        message="Chart.yaml declares dependencies but Chart.lock is missing; run 'helm dependency update'",
-                        integrity=True,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker="helm",
+                            path=chart_yaml_rel,
+                            line=0,
+                            message="Chart.yaml declares dependencies but Chart.lock is missing; run 'helm dependency update'",
+                            integrity=True,
+                        )
+                    )
 
             # Check Chart.lock for missing digests and cross-reference deps
             if has_chart_lock:
                 chart_lock_path = os.path.join(dir_path, "Chart.lock")
                 chart_lock_rel = os.path.relpath(chart_lock_path, root)
-                lock_findings = self._check_lock_digests(chart_lock_path, chart_lock_rel)
+                lock_findings = self._check_lock_digests(
+                    chart_lock_path, chart_lock_rel
+                )
                 findings.extend(lock_findings)
 
                 # Cross-reference: every dep in Chart.yaml must appear in Chart.lock
@@ -56,16 +62,20 @@ class HelmChecker(Checker):
                     lock_deps = self._parse_dep_names(chart_lock_path)
                     missing = [dep for dep in sorted(yaml_deps) if dep not in lock_deps]
                     if missing:
-                        findings.append(Finding(
-                            checker="helm",
-                            path=chart_lock_rel,
-                            line=0,
-                            message="Chart.lock is stale: missing {} ({})".format(
-                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                                ", ".join(sorted(missing)),
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker="helm",
+                                path=chart_lock_rel,
+                                line=0,
+                                message="Chart.lock is stale: missing {} ({})".format(
+                                    "{} dependency".format(len(missing))
+                                    if len(missing) == 1
+                                    else "{} dependencies".format(len(missing)),
+                                    ", ".join(sorted(missing)),
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings
 
@@ -75,7 +85,9 @@ class HelmChecker(Checker):
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     stripped = line.rstrip()
-                    if stripped == "dependencies:" or stripped.startswith("dependencies:"):
+                    if stripped == "dependencies:" or stripped.startswith(
+                        "dependencies:"
+                    ):
                         return True
         except OSError:
             pass
@@ -99,11 +111,15 @@ class HelmChecker(Checker):
                         continue
                     if in_deps:
                         # A top-level non-indented, non-list key ends the section
-                        if stripped and not stripped[0].isspace() and not stripped.startswith("-"):
+                        if (
+                            stripped
+                            and not stripped[0].isspace()
+                            and not stripped.startswith("-")
+                        ):
                             in_deps = False
                             continue
                         if bare.startswith("- name:"):
-                            name = bare[len("- name:"):].strip()
+                            name = bare[len("- name:") :].strip()
                             if name:
                                 names.add(name)
         except OSError:
@@ -150,14 +166,18 @@ class HelmChecker(Checker):
             if stripped.startswith("- name:"):
                 # Flush previous dep
                 if dep_name is not None and not has_digest:
-                    findings.append(Finding(
-                        checker="helm",
-                        path=rel_path,
-                        line=dep_line,
-                        message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
-                        integrity=True,
-                    ))
-                dep_name = stripped[len("- name:"):].strip()
+                    findings.append(
+                        Finding(
+                            checker="helm",
+                            path=rel_path,
+                            line=dep_line,
+                            message="dependency '{}' in Chart.lock is missing digest: field".format(
+                                dep_name
+                            ),
+                            integrity=True,
+                        )
+                    )
+                dep_name = stripped[len("- name:") :].strip()
                 dep_line = lineno
                 has_digest = False
                 continue
@@ -167,12 +187,16 @@ class HelmChecker(Checker):
 
         # Flush last dep
         if dep_name is not None and not has_digest:
-            findings.append(Finding(
-                checker="helm",
-                path=rel_path,
-                line=dep_line,
-                message="dependency '{}' in Chart.lock is missing digest: field".format(dep_name),
-                integrity=True,
-            ))
+            findings.append(
+                Finding(
+                    checker="helm",
+                    path=rel_path,
+                    line=dep_line,
+                    message="dependency '{}' in Chart.lock is missing digest: field".format(
+                        dep_name
+                    ),
+                    integrity=True,
+                )
+            )
 
         return findings

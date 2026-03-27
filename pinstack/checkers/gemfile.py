@@ -51,7 +51,7 @@ def _parse_gemfile_lock_specs(path: str) -> set[str]:
                 in_specs = False
                 continue
             # Gem lines are indented with 4 spaces: "    name (version)"
-            m = re.match(r'^    ([A-Za-z0-9_\-\.]+)\s+\(', stripped)
+            m = re.match(r"^    ([A-Za-z0-9_\-\.]+)\s+\(", stripped)
             if m:
                 names.add(m.group(1))
             elif stripped and not stripped.startswith(" "):
@@ -76,13 +76,15 @@ class GemfileChecker(Checker):
 
             if has_gemfile and not has_lock:
                 rel_path = os.path.relpath(os.path.join(dir_path, "Gemfile"), root)
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message="Gemfile has no corresponding Gemfile.lock; run 'bundle install'",
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message="Gemfile has no corresponding Gemfile.lock; run 'bundle install'",
+                        integrity=True,
+                    )
+                )
                 continue
 
             # Both exist — cross-reference deps
@@ -96,15 +98,19 @@ class GemfileChecker(Checker):
                 missing = [dep for dep in gemfile_deps if dep not in lock_specs]
                 if missing:
                     rel_lock = os.path.relpath(lock_path, root)
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_lock,
-                        line=0,
-                        message="Gemfile.lock is stale: missing {} ({})".format(
-                            "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                            ", ".join(sorted(missing)),
-                        ),
-                        integrity=True,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_lock,
+                            line=0,
+                            message="Gemfile.lock is stale: missing {} ({})".format(
+                                "{} dependency".format(len(missing))
+                                if len(missing) == 1
+                                else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                            integrity=True,
+                        )
+                    )
 
         return findings

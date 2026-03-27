@@ -65,14 +65,14 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
             # Strip node_modules/ prefix (possibly nested)
             name = key
             while name.startswith("node_modules/"):
-                name = name[len("node_modules/"):]
+                name = name[len("node_modules/") :]
             if name:
                 names.add(name)
     elif lock_filename == "yarn.lock":
         # Non-indented lines ending with : are package headers
         # e.g. "express@4.18.2:" or "express@^4.18.2, express@>=4.0.0:"
         for line in content.splitlines():
-            if not line or line[0] in (' ', '\t', '#'):
+            if not line or line[0] in (" ", "\t", "#"):
                 continue
             if line.endswith(":"):
                 # First entry before comma; extract name before @version
@@ -112,8 +112,15 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
 
 class PackageJsonChecker(Checker):
     name = "package_json"
-    description = "Checks package.json files for unpinned (non-exact) dependency versions"
-    patterns: list[str] = ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
+    description = (
+        "Checks package.json files for unpinned (non-exact) dependency versions"
+    )
+    patterns: list[str] = [
+        "package.json",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+    ]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
@@ -145,26 +152,30 @@ class PackageJsonChecker(Checker):
                     is_bad, reason = _is_unpinned(version)
                     if is_bad:
                         integrity = reason == "not content-addressed"
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=0,
-                            message="'{}' in {} has {} '{}'; use an exact version".format(
-                                pkg, section, reason, version
-                            ),
-                            integrity=integrity,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=0,
+                                message="'{}' in {} has {} '{}'; use an exact version".format(
+                                    pkg, section, reason, version
+                                ),
+                                integrity=integrity,
+                            )
+                        )
 
             # Check for companion lock file
             found_lock_files = files & _LOCK_FILES
             if has_deps and not found_lock_files:
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message="package.json has dependencies but no lock file (package-lock.json, yarn.lock, or pnpm-lock.yaml)",
+                        integrity=True,
+                    )
+                )
             elif has_deps and found_lock_files:
                 # Cross-reference: check that every manifest dep appears in the lock file
                 lock_filename = sorted(found_lock_files)[0]
@@ -179,16 +190,20 @@ class PackageJsonChecker(Checker):
                             if pkg not in lock_names:
                                 missing.append(pkg)
                     if missing:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=0,
-                            message="{} is stale: missing {} ({})".format(
-                                lock_filename,
-                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                                ", ".join(sorted(missing)),
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=0,
+                                message="{} is stale: missing {} ({})".format(
+                                    lock_filename,
+                                    "{} dependency".format(len(missing))
+                                    if len(missing) == 1
+                                    else "{} dependencies".format(len(missing)),
+                                    ", ".join(sorted(missing)),
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

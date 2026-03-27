@@ -19,6 +19,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Runner helper
 # ---------------------------------------------------------------------------
 
+
 def run_pinstack(*args):
     # type: (*str) -> tuple
     """Run pinstack as a subprocess, return (returncode, stdout, stderr)."""
@@ -30,6 +31,7 @@ def run_pinstack(*args):
 # ---------------------------------------------------------------------------
 # File-creation helpers
 # ---------------------------------------------------------------------------
+
 
 def _write(path, content):
     # type: (str, str) -> None
@@ -56,11 +58,7 @@ _GOOD_REQUIREMENTS = (
     "--hash=sha256:c97959a1b29a759d727e64bd99218db638204f6e69a893d4c57a8b534cc8e3ee\n"
 )
 
-_BAD_REQUIREMENTS = (
-    "# missing pin and hash\n"
-    "requests>=2.0\n"
-    "urllib3\n"
-)
+_BAD_REQUIREMENTS = "# missing pin and hash\nrequests>=2.0\nurllib3\n"
 
 # A pyproject.toml with properly == pinned production deps
 _GOOD_PYPROJECT = """\
@@ -105,6 +103,7 @@ _GOOD_DOCKERFILE = (
 # test_clean_python_project
 # ---------------------------------------------------------------------------
 
+
 class TestCleanPythonProject:
     def test_exit_zero(self):
         d = _tmpdir()
@@ -141,6 +140,7 @@ class TestCleanPythonProject:
 # test_bad_python_project
 # ---------------------------------------------------------------------------
 
+
 class TestBadPythonProject:
     def test_exit_one(self):
         d = _tmpdir()
@@ -176,6 +176,7 @@ class TestBadPythonProject:
 # test_bad_dockerfile
 # ---------------------------------------------------------------------------
 
+
 class TestBadDockerfile:
     def test_exit_one(self):
         d = _tmpdir()
@@ -209,6 +210,7 @@ class TestBadDockerfile:
 # ---------------------------------------------------------------------------
 # test_sarif_output_valid_json
 # ---------------------------------------------------------------------------
+
 
 class TestSarifOutputValidJson:
     def test_valid_sarif_json(self):
@@ -257,6 +259,7 @@ class TestSarifOutputValidJson:
 # test_exit_zero_overrides
 # ---------------------------------------------------------------------------
 
+
 class TestExitZeroOverrides:
     def test_exit_zero_with_findings(self):
         d = _tmpdir()
@@ -291,6 +294,7 @@ class TestExitZeroOverrides:
 # test_check_flag_limits_checkers
 # ---------------------------------------------------------------------------
 
+
 class TestCheckFlagLimitsCheckers:
     def test_only_requirements_findings(self):
         d = _tmpdir()
@@ -313,8 +317,7 @@ class TestCheckFlagLimitsCheckers:
             rc, out, err = run_pinstack(d, "--check", "requirements")
             # pyproject.toml lines should NOT appear in the output findings
             lines_with_pyproject = [
-                ln for ln in out.splitlines()
-                if "pyproject.toml" in ln and "FAIL" in ln
+                ln for ln in out.splitlines() if "pyproject.toml" in ln and "FAIL" in ln
             ]
             assert lines_with_pyproject == []
         finally:
@@ -334,6 +337,7 @@ class TestCheckFlagLimitsCheckers:
 # ---------------------------------------------------------------------------
 # test_exclude_flag
 # ---------------------------------------------------------------------------
+
 
 class TestExcludeFlag:
     def test_excluding_requirements_leaves_other_findings(self):
@@ -355,7 +359,8 @@ class TestExcludeFlag:
             rc, out, err = run_pinstack(d, "--exclude", "requirements")
             # requirements.txt lines should NOT be in findings
             finding_lines = [
-                ln for ln in out.splitlines()
+                ln
+                for ln in out.splitlines()
                 if "requirements.txt" in ln and "FAIL" in ln
             ]
             assert finding_lines == []
@@ -381,6 +386,7 @@ class TestExcludeFlag:
 # ---------------------------------------------------------------------------
 # test_max_depth_limits_scan
 # ---------------------------------------------------------------------------
+
 
 class TestMaxDepthLimitsScan:
     def _create_nested_dockerfile(self, base):
@@ -427,6 +433,7 @@ class TestMaxDepthLimitsScan:
 # test_list_checkers
 # ---------------------------------------------------------------------------
 
+
 class TestListCheckers:
     # The 16 canonical checker names as registered
     EXPECTED_NAMES = {
@@ -471,6 +478,7 @@ class TestListCheckers:
 # test_self_scan
 # ---------------------------------------------------------------------------
 
+
 class TestSelfScan:
     def test_self_scan_runs_without_crash(self):
         rc, out, err = run_pinstack(PROJECT_ROOT)
@@ -499,6 +507,7 @@ class TestSelfScan:
 # ---------------------------------------------------------------------------
 # --exclude-dir
 # ---------------------------------------------------------------------------
+
 
 class TestExcludeDir:
     def test_exclude_dir_skips_directory(self):

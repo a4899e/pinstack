@@ -145,13 +145,17 @@ class GradleChecker(Checker):
                 # Report against the first build file found
                 first_build = build_files[0]
                 rel_path = os.path.relpath(os.path.join(dir_path, first_build), root)
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message="{} has no gradle.lockfile; run 'gradle dependencies --write-locks'".format(first_build),
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message="{} has no gradle.lockfile; run 'gradle dependencies --write-locks'".format(
+                            first_build
+                        ),
+                        integrity=True,
+                    )
+                )
 
             # Parse lockfile coords once (if present) for cross-referencing
             lock_coords: set[str] = set()
@@ -189,22 +193,30 @@ class GradleChecker(Checker):
                     coord = "{}:{}".format(group, artifact)
 
                     if version is None:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="'{}' has no version specified; pin to an exact version".format(coord),
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="'{}' has no version specified; pin to an exact version".format(
+                                    coord
+                                ),
+                            )
+                        )
                         continue
 
                     reason = _is_bad_version(version)
                     if reason:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="'{}' uses {}; pin to an exact version".format(coord, reason),
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="'{}' uses {}; pin to an exact version".format(
+                                    coord, reason
+                                ),
+                            )
+                        )
                         continue
 
                     # Version is pinned and valid: collect for cross-reference
@@ -212,16 +224,22 @@ class GradleChecker(Checker):
                         missing_from_lock.append(coord)
 
             if missing_from_lock:
-                lock_rel = os.path.relpath(os.path.join(dir_path, "gradle.lockfile"), root)
-                findings.append(Finding(
-                    checker=self.name,
-                    path=lock_rel,
-                    line=0,
-                    message="gradle.lockfile is stale: missing {} ({})".format(
-                        "{} dependency".format(len(missing_from_lock)) if len(missing_from_lock) == 1 else "{} dependencies".format(len(missing_from_lock)),
-                        ", ".join(sorted(missing_from_lock)),
-                    ),
-                    integrity=True,
-                ))
+                lock_rel = os.path.relpath(
+                    os.path.join(dir_path, "gradle.lockfile"), root
+                )
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=lock_rel,
+                        line=0,
+                        message="gradle.lockfile is stale: missing {} ({})".format(
+                            "{} dependency".format(len(missing_from_lock))
+                            if len(missing_from_lock) == 1
+                            else "{} dependencies".format(len(missing_from_lock)),
+                            ", ".join(sorted(missing_from_lock)),
+                        ),
+                        integrity=True,
+                    )
+                )
 
         return findings

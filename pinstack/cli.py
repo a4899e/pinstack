@@ -20,6 +20,7 @@ from pinstack.core import (
 
 def _build_registry() -> CheckerRegistry:
     from pinstack.checkers import ALL_CHECKERS
+
     reg = CheckerRegistry()
     for cls in ALL_CHECKERS:
         reg.register(cls)
@@ -146,6 +147,7 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     if args.output_format == "sarif":
         from pinstack.sarif import format_sarif
+
         sys.stdout.write(format_sarif(findings))
         sys.stdout.write("\n")
     else:

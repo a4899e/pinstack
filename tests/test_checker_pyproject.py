@@ -27,6 +27,7 @@ def _check_subdir(subdir_name):
 # Unit tests for extract_dependency_arrays (state-machine parser)
 # ---------------------------------------------------------------------------
 
+
 class TestExtractDependencyArrays:
     def test_single_line_array(self):
         content = '[project]\ndependencies = ["requests==2.31.0", "flask==2.3.2"]\n'
@@ -38,11 +39,11 @@ class TestExtractDependencyArrays:
 
     def test_multi_line_array(self):
         content = (
-            '[project]\n'
-            'dependencies = [\n'
+            "[project]\n"
+            "dependencies = [\n"
             '    "flask==2.3.2",\n'
             '    "requests==2.31.0",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -52,11 +53,11 @@ class TestExtractDependencyArrays:
 
     def test_inline_comments_stripped(self):
         content = (
-            '[project]\n'
-            'dependencies = [\n'
+            "[project]\n"
+            "dependencies = [\n"
             '    "flask==2.3.2",  # web framework\n'
             '    "requests==2.31.0",  # http\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -66,13 +67,13 @@ class TestExtractDependencyArrays:
 
     def test_optional_dependencies_sections(self):
         content = (
-            '[project.optional-dependencies]\n'
-            'dev = [\n'
+            "[project.optional-dependencies]\n"
+            "dev = [\n"
             '    "pytest==7.4.0",\n'
-            ']\n'
-            'docs = [\n'
+            "]\n"
+            "docs = [\n"
             '    "sphinx==7.1.0",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 2
@@ -84,10 +85,7 @@ class TestExtractDependencyArrays:
 
     def test_optional_dependencies_hyphenated_key(self):
         """Keys with hyphens like local-llm should be matched."""
-        content = (
-            '[project.optional-dependencies]\n'
-            'local-llm = ["mlx-lm>=0.20.0"]\n'
-        )
+        content = '[project.optional-dependencies]\nlocal-llm = ["mlx-lm>=0.20.0"]\n'
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
         deps, label = arrays[0]
@@ -96,10 +94,7 @@ class TestExtractDependencyArrays:
 
     def test_quoted_hyphenated_key(self):
         """Quoted keys like "local-llm" should be matched."""
-        content = (
-            '[project.optional-dependencies]\n'
-            '"local-llm" = ["mlx-lm>=0.20.0"]\n'
-        )
+        content = '[project.optional-dependencies]\n"local-llm" = ["mlx-lm>=0.20.0"]\n'
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
         deps, label = arrays[0]
@@ -108,10 +103,7 @@ class TestExtractDependencyArrays:
 
     def test_single_quoted_key(self):
         """Single-quoted keys should be matched."""
-        content = (
-            '[dependency-groups]\n'
-            "'dev-test' = [\"pytest>=8.3.0\"]\n"
-        )
+        content = "[dependency-groups]\n'dev-test' = [\"pytest>=8.3.0\"]\n"
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
         deps, label = arrays[0]
@@ -121,11 +113,11 @@ class TestExtractDependencyArrays:
     def test_dependency_groups_pep735(self):
         """[dependency-groups] (PEP 735) arrays should be extracted."""
         content = (
-            '[dependency-groups]\n'
-            'dev = [\n'
+            "[dependency-groups]\n"
+            "dev = [\n"
             '    "pytest==9.0.2",\n'
             '    "ruff==0.15.5",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -137,7 +129,7 @@ class TestExtractDependencyArrays:
     def test_dependency_groups_include_group_skipped(self):
         """PEP 735 {include-group = "base"} objects should not be parsed as deps."""
         content = (
-            '[dependency-groups]\n'
+            "[dependency-groups]\n"
             'base = ["pytest==8.3.0"]\n'
             'dev = [{include-group = "base"}, "ruff==0.15.5"]\n'
         )
@@ -154,12 +146,12 @@ class TestExtractDependencyArrays:
     def test_dependency_groups_include_group_multiline(self):
         """Multi-line arrays with include-group objects should skip the objects."""
         content = (
-            '[dependency-groups]\n'
+            "[dependency-groups]\n"
             'base = ["pytest==8.3.0"]\n'
-            'dev = [\n'
+            "dev = [\n"
             '    {include-group = "base"},\n'
             '    "ruff==0.15.5",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         dev_deps = [d for deps, label in arrays if label == "dev" for d in deps]
@@ -169,11 +161,11 @@ class TestExtractDependencyArrays:
     def test_hatch_env_dependencies(self):
         """[tool.hatch.envs.*.dependencies] arrays should be extracted."""
         content = (
-            '[tool.hatch.envs.default]\n'
-            'dependencies = [\n'
+            "[tool.hatch.envs.default]\n"
+            "dependencies = [\n"
             '    "pytest==9.0.2",\n'
             '    "ruff>=0.15.0",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -184,11 +176,11 @@ class TestExtractDependencyArrays:
     def test_pdm_dev_dependencies(self):
         """[tool.pdm.dev-dependencies] group arrays should be extracted."""
         content = (
-            '[tool.pdm.dev-dependencies]\n'
-            'test = [\n'
+            "[tool.pdm.dev-dependencies]\n"
+            "test = [\n"
             '    "pytest>=8.3.0",\n'
             '    "ruff==0.5.0",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -198,22 +190,19 @@ class TestExtractDependencyArrays:
 
     def test_tool_section_non_dep_key_ignored(self):
         """Arrays in tool sections whose key doesn't contain 'dependencies' are skipped."""
-        content = (
-            '[tool.ruff.lint]\n'
-            'select = ["E", "F", "W"]\n'
-        )
+        content = '[tool.ruff.lint]\nselect = ["E", "F", "W"]\n'
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 0
 
     def test_ignores_classifiers_array(self):
         content = (
-            '[project]\n'
-            'classifiers = [\n'
+            "[project]\n"
+            "classifiers = [\n"
             '    "Development Status :: 3 - Alpha",\n'
-            ']\n'
-            'dependencies = [\n'
+            "]\n"
+            "dependencies = [\n"
             '    "flask==2.3.2",\n'
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         assert len(arrays) == 1
@@ -223,7 +212,7 @@ class TestExtractDependencyArrays:
         assert not any("Development Status" in d for d in deps)
 
     def test_empty_array(self):
-        content = '[project]\ndependencies = []\n'
+        content = "[project]\ndependencies = []\n"
         arrays = extract_dependency_arrays(content)
         # Either returns empty list or a single entry with empty deps
         total_deps = sum(len(deps) for deps, _ in arrays)
@@ -237,11 +226,11 @@ class TestExtractDependencyArrays:
 
     def test_trailing_comma_handled(self):
         content = (
-            '[project]\n'
-            'dependencies = [\n'
+            "[project]\n"
+            "dependencies = [\n"
             '    "flask==2.3.2",\n'
             '    "requests==2.31.0",\n'  # trailing comma on last item
-            ']\n'
+            "]\n"
         )
         arrays = extract_dependency_arrays(content)
         deps, _ = arrays[0]
@@ -257,10 +246,10 @@ class TestExtractDependencyArrays:
 
     def test_both_project_and_optional_deps(self):
         content = (
-            '[project]\n'
+            "[project]\n"
             'dependencies = ["flask==2.3.2"]\n'
-            '\n'
-            '[project.optional-dependencies]\n'
+            "\n"
+            "[project.optional-dependencies]\n"
             'dev = ["pytest==7.4.0"]\n'
         )
         arrays = extract_dependency_arrays(content)
@@ -272,11 +261,11 @@ class TestExtractDependencyArrays:
     def test_build_system_requires_ignored(self):
         """[build-system] requires array should NOT be checked as dependencies."""
         content = (
-            '[build-system]\n'
+            "[build-system]\n"
             'requires = ["setuptools>=61.0", "wheel"]\n'
             'build-backend = "setuptools.build_meta"\n'
-            '\n'
-            '[project]\n'
+            "\n"
+            "[project]\n"
             'dependencies = ["flask==2.3.2"]\n'
         )
         arrays = extract_dependency_arrays(content)
@@ -292,10 +281,13 @@ class TestExtractDependencyArrays:
 # Integration tests using fixture subdirectories
 # ---------------------------------------------------------------------------
 
+
 class TestPyprojectCheckerGood:
     def test_good_toml_no_findings(self):
         findings = _check_subdir("good")
-        assert findings == [], "All ==pins should produce 0 findings, got: {}".format(findings)
+        assert findings == [], "All ==pins should produce 0 findings, got: {}".format(
+            findings
+        )
 
     def test_checker_name(self):
         checker = PyprojectChecker()
@@ -309,7 +301,9 @@ class TestPyprojectCheckerGood:
 class TestPyprojectCheckerBad:
     def test_bad_toml_has_findings(self):
         findings = _check_subdir("bad")
-        assert len(findings) == 3, "flask>=, requests~=, certifi (bare) should give 3 findings"
+        assert len(findings) == 3, (
+            "flask>=, requests~=, certifi (bare) should give 3 findings"
+        )
 
     def test_bad_toml_has_three_findings(self):
         findings = _check_subdir("bad")
@@ -404,11 +398,11 @@ class TestPyprojectCheckerOptionalDeps:
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             with open(toml_path, "w") as fh:
                 fh.write(
-                    '[project.optional-dependencies]\n'
-                    'dev = [\n'
+                    "[project.optional-dependencies]\n"
+                    "dev = [\n"
                     '    "pytest>=7.0",\n'
                     '    "black==23.7.0",\n'
-                    ']\n'
+                    "]\n"
                 )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
@@ -427,13 +421,16 @@ class TestPyprojectCheckerHyphenatedOptionalKey:
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             with open(toml_path, "w") as fh:
                 fh.write(
-                    '[project.optional-dependencies]\n'
-                    'local-llm = ["mlx-lm>=0.20.0"]\n'
+                    '[project.optional-dependencies]\nlocal-llm = ["mlx-lm>=0.20.0"]\n'
                 )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "mlx-lm" in pin_findings[0].message
         finally:
@@ -448,16 +445,20 @@ class TestDependencyGroups:
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             with open(toml_path, "w") as fh:
                 fh.write(
-                    '[dependency-groups]\n'
-                    'dev = [\n'
+                    "[dependency-groups]\n"
+                    "dev = [\n"
                     '    "pytest>=9.0",\n'
                     '    "ruff==0.15.5",\n'
-                    ']\n'
+                    "]\n"
                 )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "pytest" in pin_findings[0].message
         finally:
@@ -470,16 +471,20 @@ class TestDependencyGroups:
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             with open(toml_path, "w") as fh:
                 fh.write(
-                    '[dependency-groups]\n'
-                    'dev = [\n'
+                    "[dependency-groups]\n"
+                    "dev = [\n"
                     '    "pytest==9.0.2",\n'
                     '    "ruff==0.15.5",\n'
-                    ']\n'
+                    "]\n"
                 )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert pin_findings == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -491,16 +496,22 @@ class TestDependencyGroups:
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             with open(toml_path, "w") as fh:
                 fh.write(
-                    '[dependency-groups]\n'
+                    "[dependency-groups]\n"
                     'base = ["pytest==8.3.0"]\n'
                     'dev = [{include-group = "base"}, "ruff==0.15.5"]\n'
                 )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
-            assert pin_findings == [], "include-group objects should not produce findings, got: {}".format(
-                [f.message for f in pin_findings]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
+            assert pin_findings == [], (
+                "include-group objects should not produce findings, got: {}".format(
+                    [f.message for f in pin_findings]
+                )
             )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -511,19 +522,15 @@ class TestDependencyGroups:
 # ---------------------------------------------------------------------------
 
 _PYPROJECT_WITH_DEPS = (
-    '[project]\n'
+    "[project]\n"
     'name = "myapp"\n'
     'version = "1.0.0"\n'
-    'dependencies = [\n'
+    "dependencies = [\n"
     '    "flask==2.3.2",\n'
-    ']\n'
+    "]\n"
 )
 
-_PYPROJECT_NO_DEPS = (
-    '[project]\n'
-    'name = "myapp"\n'
-    'version = "1.0.0"\n'
-)
+_PYPROJECT_NO_DEPS = '[project]\nname = "myapp"\nversion = "1.0.0"\n'
 
 
 def _make_pyproject(tmpdir, content):
@@ -541,10 +548,7 @@ class TestPyprojectLockFileCheck:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml"}}
             findings = checker.check(index, tmpdir)
-            lock_warnings = [
-                f for f in findings
-                if "lock file" in f.message
-            ]
+            lock_warnings = [f for f in findings if "lock file" in f.message]
             assert len(lock_warnings) == 1
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -628,13 +632,13 @@ class TestPyprojectLockFileCheck:
 # ---------------------------------------------------------------------------
 
 _PYPROJECT_TWO_DEPS = (
-    '[project]\n'
+    "[project]\n"
     'name = "myapp"\n'
     'version = "1.0.0"\n'
-    'dependencies = [\n'
+    "dependencies = [\n"
     '    "flask==2.0",\n'
     '    "requests==2.28.0",\n'
-    ']\n'
+    "]\n"
 )
 
 
@@ -665,11 +669,15 @@ class TestPyprojectLockFileCrossRef:
             with open(os.path.join(tmpdir, "requirements-dev.txt"), "w") as fh:
                 fh.write("requests==2.28.0\n")
             checker = PyprojectChecker()
-            index = {tmpdir: {"pyproject.toml", "requirements.txt", "requirements-dev.txt"}}
+            index = {
+                tmpdir: {"pyproject.toml", "requirements.txt", "requirements-dev.txt"}
+            }
             findings = checker.check(index, tmpdir)
             cross_ref = [f for f in findings if "stale" in f.message]
-            assert cross_ref == [], "split lockfiles should satisfy cross-ref, got: {}".format(
-                [f.message for f in cross_ref]
+            assert cross_ref == [], (
+                "split lockfiles should satisfy cross-ref, got: {}".format(
+                    [f.message for f in cross_ref]
+                )
             )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -724,11 +732,7 @@ class TestPyprojectLockFileCrossRef:
         tmpdir = tempfile.mkdtemp()
         try:
             toml_content = (
-                '[project]\n'
-                'name = "myapp"\n'
-                'dependencies = [\n'
-                '    "Flask==2.0",\n'
-                ']\n'
+                '[project]\nname = "myapp"\ndependencies = [\n    "Flask==2.0",\n]\n'
             )
             _make_pyproject(tmpdir, toml_content)
             req_path = os.path.join(tmpdir, "requirements.txt")
@@ -747,11 +751,11 @@ class TestPyprojectLockFileCrossRef:
         tmpdir = tempfile.mkdtemp()
         try:
             toml_content = (
-                '[project]\n'
+                "[project]\n"
                 'name = "myapp"\n'
-                'dependencies = [\n'
+                "dependencies = [\n"
                 '    "my-package==1.0",\n'
-                ']\n'
+                "]\n"
             )
             _make_pyproject(tmpdir, toml_content)
             req_path = os.path.join(tmpdir, "requirements.txt")
@@ -772,11 +776,11 @@ class TestPyprojectLockFileCrossRef:
             lock_path = os.path.join(tmpdir, "poetry.lock")
             with open(lock_path, "w") as fh:
                 fh.write(
-                    '[[package]]\n'
+                    "[[package]]\n"
                     'name = "requests"\n'
                     'version = "2.28.0"\n'
-                    '\n'
-                    '[[package]]\n'
+                    "\n"
+                    "[[package]]\n"
                     'name = "flask"\n'
                     'version = "2.0"\n'
                 )
@@ -795,11 +799,11 @@ class TestPyprojectLockFileCrossRef:
             lock_path = os.path.join(tmpdir, "uv.lock")
             with open(lock_path, "w") as fh:
                 fh.write(
-                    '[[package]]\n'
+                    "[[package]]\n"
                     'name = "requests"\n'
                     'version = "2.28.0"\n'
-                    '\n'
-                    '[[package]]\n'
+                    "\n"
+                    "[[package]]\n"
                     'name = "flask"\n'
                     'version = "2.0"\n'
                 )
@@ -815,6 +819,7 @@ class TestPyprojectLockFileCrossRef:
 # ---------------------------------------------------------------------------
 # Poetry dependency tests
 # ---------------------------------------------------------------------------
+
 
 def _make_poetry_pyproject(tmpdir, content):
     # type: (str, str) -> None
@@ -842,17 +847,26 @@ class TestPoetryDependencies:
         """All == pinned Poetry deps produce 0 findings (excluding lock file finding)."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'requests = "==2.28.0"\n'
-                'flask = "==2.3.0"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    'requests = "==2.28.0"\n'
+                    'flask = "==2.3.0"\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
-            assert pin_findings == [], "All == pins should produce 0 findings, got: {}".format(pin_findings)
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
+            assert pin_findings == [], (
+                "All == pins should produce 0 findings, got: {}".format(pin_findings)
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -860,15 +874,18 @@ class TestPoetryDependencies:
         """Caret constraint ^2.28 should be flagged."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'requests = "^2.28"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "^2.28"\n'),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "requests" in pin_findings[0].message
 
@@ -879,15 +896,18 @@ class TestPoetryDependencies:
         """Tilde constraint ~2.28 should be flagged."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'flask = "~2.3"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                ('[tool.poetry.dependencies]\npython = "^3.9"\nflask = "~2.3"\n'),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "flask" in pin_findings[0].message
         finally:
@@ -897,15 +917,22 @@ class TestPoetryDependencies:
         """{version = "^2.3"} inline table constraint should be flagged."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'flask = {version = "^2.3", extras = ["async"]}\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    'flask = {version = "^2.3", extras = ["async"]}\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "flask" in pin_findings[0].message
         finally:
@@ -915,15 +942,22 @@ class TestPoetryDependencies:
         """python = "^3.9" should NOT be flagged (python version constraint)."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'requests = "==2.28.0"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    'requests = "==2.28.0"\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             python_findings = [f for f in pin_findings if "python" in f.message.lower()]
             assert python_findings == [], "python key should never be flagged"
         finally:
@@ -933,17 +967,24 @@ class TestPoetryDependencies:
         """[tool.poetry.dev-dependencies] should be scanned."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                '\n'
-                '[tool.poetry.dev-dependencies]\n'
-                'pytest = "^7.0"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    "\n"
+                    "[tool.poetry.dev-dependencies]\n"
+                    'pytest = "^7.0"\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "pytest" in pin_findings[0].message
         finally:
@@ -953,17 +994,24 @@ class TestPoetryDependencies:
         """[tool.poetry.group.test.dependencies] should be scanned."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                '\n'
-                '[tool.poetry.group.test.dependencies]\n'
-                'coverage = "^7.0"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    "\n"
+                    "[tool.poetry.group.test.dependencies]\n"
+                    'coverage = "^7.0"\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "coverage" in pin_findings[0].message
         finally:
@@ -973,34 +1021,42 @@ class TestPoetryDependencies:
         """Wildcard * constraint should be flagged."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'requests = "*"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "*"\n'),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
             assert len(pin_findings) == 1
             assert "requests" in pin_findings[0].message
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_poetry_exact_no_operator(self):
-        """"2.28.0" (no operator) is accepted as an exact pin in Poetry."""
+        """ "2.28.0" (no operator) is accepted as an exact pin in Poetry."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'requests = "2.28.0"\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "2.28.0"\n'),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
-            assert pin_findings == [], "bare version string is exact in Poetry, got: {}".format(pin_findings)
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
+            assert pin_findings == [], (
+                "bare version string is exact in Poetry, got: {}".format(pin_findings)
+            )
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1009,9 +1065,7 @@ class TestPoetryDependencies:
         tmpdir = tempfile.mkdtemp()
         try:
             toml_content = (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'black = "==23.7.0"\n'
+                '[tool.poetry.dependencies]\npython = "^3.9"\nblack = "==23.7.0"\n'
             )
             toml_path = os.path.join(tmpdir, "pyproject.toml")
             lock_path = os.path.join(tmpdir, "poetry.lock")
@@ -1019,9 +1073,7 @@ class TestPoetryDependencies:
                 fh.write(toml_content)
             # Lock file does NOT contain black — should trigger a stale warning
             with open(lock_path, "w") as fh:
-                fh.write(
-                    '[[package]]\nname = "requests"\nversion = "2.28.0"\n'
-                )
+                fh.write('[[package]]\nname = "requests"\nversion = "2.28.0"\n')
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
@@ -1035,17 +1087,26 @@ class TestPoetryDependencies:
         """Git deps in inline tables should be flagged, not silently skipped."""
         tmpdir = tempfile.mkdtemp()
         try:
-            _make_poetry_pyproject(tmpdir, (
-                '[tool.poetry.dependencies]\n'
-                'python = "^3.9"\n'
-                'internal-lib = { git = "https://github.com/example/internal-lib.git", rev = "abcdef" }\n'
-            ))
+            _make_poetry_pyproject(
+                tmpdir,
+                (
+                    "[tool.poetry.dependencies]\n"
+                    'python = "^3.9"\n'
+                    'internal-lib = { git = "https://github.com/example/internal-lib.git", rev = "abcdef" }\n'
+                ),
+            )
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            pin_findings = [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
-            assert len(pin_findings) == 1, "git inline-table dep should be flagged, got: {}".format(
-                [f.message for f in pin_findings]
+            pin_findings = [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
+            assert len(pin_findings) == 1, (
+                "git inline-table dep should be flagged, got: {}".format(
+                    [f.message for f in pin_findings]
+                )
             )
             assert "internal-lib" in pin_findings[0].message
         finally:
@@ -1056,7 +1117,7 @@ class TestPoetryDependencies:
         tmpdir = tempfile.mkdtemp()
         try:
             toml_content = (
-                '[tool.poetry.dependencies]\n'
+                "[tool.poetry.dependencies]\n"
                 'python = "^3.9"\n'
                 'internal-lib = { git = "https://github.com/example/lib.git", rev = "abc" }\n'
             )
@@ -1083,7 +1144,11 @@ class TestPEP508DirectReferences:
         """Run pyproject checker on a single PEP 621 dependency."""
         tmpdir = tempfile.mkdtemp()
         try:
-            content = '[project]\nname = "test"\ndependencies = [\n    "{}",\n]\n'.format(dep_line)
+            content = (
+                '[project]\nname = "test"\ndependencies = [\n    "{}",\n]\n'.format(
+                    dep_line
+                )
+            )
             with open(os.path.join(tmpdir, "pyproject.toml"), "w") as fh:
                 fh.write(content)
             with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
@@ -1091,19 +1156,27 @@ class TestPEP508DirectReferences:
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
-            return [f for f in findings if "lock file" not in f.message and "stale" not in f.message]
+            return [
+                f
+                for f in findings
+                if "lock file" not in f.message and "stale" not in f.message
+            ]
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_mutable_git_tag_flagged(self):
         """git+https://...@v0.3.0 is a movable tag, should be flagged."""
-        findings = self._check_pep508("lib @ git+https://github.com/example/lib.git@v0.3.0")
+        findings = self._check_pep508(
+            "lib @ git+https://github.com/example/lib.git@v0.3.0"
+        )
         assert len(findings) == 1
         assert "mutable" in findings[0].message
 
     def test_mutable_git_branch_flagged(self):
         """git+https://...@main is a branch, should be flagged."""
-        findings = self._check_pep508("lib @ git+https://github.com/example/lib.git@main")
+        findings = self._check_pep508(
+            "lib @ git+https://github.com/example/lib.git@main"
+        )
         assert len(findings) == 1
         assert "mutable" in findings[0].message
 

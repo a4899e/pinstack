@@ -34,31 +34,41 @@ def _check_empty(checker):
 # package.json
 # ---------------------------------------------------------------------------
 
+
 class TestPackageJsonGood:
     def test_exact_versions_no_findings(self):
-        findings = _check_fixture_dir(PackageJsonChecker(), "package_json/good",
-                                      extra_files={"package-lock.json"})
+        findings = _check_fixture_dir(
+            PackageJsonChecker(), "package_json/good", extra_files={"package-lock.json"}
+        )
         assert findings == [], "Exact versions should produce 0 findings"
 
     def test_no_dependencies_no_findings(self):
         findings = _check_fixture_dir(PackageJsonChecker(), "package_json/no_deps")
-        assert findings == [], "package.json with no dep sections should produce 0 findings"
+        assert findings == [], (
+            "package.json with no dep sections should produce 0 findings"
+        )
 
     def test_workspace_protocol_not_flagged(self):
         findings = _check_fixture_dir(PackageJsonChecker(), "package_json/workspace")
         msgs = [f.message for f in findings]
-        assert not any("workspace" in m for m in msgs), "workspace:* should not be flagged"
+        assert not any("workspace" in m for m in msgs), (
+            "workspace:* should not be flagged"
+        )
         assert not any("shared-lib" in m for m in msgs)
 
     def test_file_protocol_not_flagged(self):
         findings = _check_fixture_dir(PackageJsonChecker(), "package_json/workspace")
         msgs = [f.message for f in findings]
-        assert not any("local-utils" in m for m in msgs), "file:../utils should not be flagged"
+        assert not any("local-utils" in m for m in msgs), (
+            "file:../utils should not be flagged"
+        )
 
     def test_url_version_flagged_as_not_content_addressed(self):
         findings = _check_fixture_dir(PackageJsonChecker(), "package_json/workspace")
         url_findings = [f for f in findings if "remote-pkg" in f.message]
-        assert len(url_findings) == 1, "https:// URL should be flagged as not content-addressed"
+        assert len(url_findings) == 1, (
+            "https:// URL should be flagged as not content-addressed"
+        )
         assert "not content-addressed" in url_findings[0].message
 
     def test_empty_index_no_findings(self):
@@ -112,6 +122,7 @@ class TestPackageJsonBad:
 # package-lock.json
 # ---------------------------------------------------------------------------
 
+
 class TestPackageLockGood:
     def test_all_integrity_no_findings(self):
         findings = _check_fixture_dir(PackageLockChecker(), "package_lock/good")
@@ -127,7 +138,9 @@ class TestPackageLockGood:
 
     def test_link_packages_skipped(self):
         findings = _check_fixture_dir(PackageLockChecker(), "package_lock/link")
-        assert findings == [], "link:true packages without integrity should not be flagged"
+        assert findings == [], (
+            "link:true packages without integrity should not be flagged"
+        )
 
 
 class TestPackageLockBad:
@@ -135,8 +148,10 @@ class TestPackageLockBad:
         self.findings = _check_fixture_dir(PackageLockChecker(), "package_lock/bad")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for lodash missing integrity, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_finding_message_contains_package(self):
@@ -153,8 +168,10 @@ class TestPackageLockV1Good:
     def test_lockfile_v1_good(self):
         """v1 lockfile with integrity on all deps should produce 0 findings."""
         findings = _check_fixture_dir(PackageLockChecker(), "package_lock/v1_good")
-        assert findings == [], "v1 lockfile with all integrity hashes should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "v1 lockfile with all integrity hashes should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
@@ -164,8 +181,10 @@ class TestPackageLockV1Bad:
 
     def test_lockfile_v1_bad(self):
         """v1 lockfile with dep missing integrity should produce 1 finding."""
-        assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for lodash missing integrity, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_finding_message_contains_package(self):
@@ -182,6 +201,7 @@ class TestPackageLockV1Bad:
 # yarn.lock
 # ---------------------------------------------------------------------------
 
+
 class TestYarnLockGood:
     def test_all_integrity_no_findings(self):
         findings = _check_fixture_dir(YarnLockChecker(), "yarn_lock/good")
@@ -195,20 +215,21 @@ class TestYarnBerryChecksum:
     def test_yarn_berry_checksum(self):
         """Yarn Berry lockfiles using checksum: instead of integrity should produce 0 findings."""
         import tempfile
+
         content = (
-            '__metadata:\n'
-            '  version: 6\n'
-            '  cacheKey: 8\n'
-            '\n'
+            "__metadata:\n"
+            "  version: 6\n"
+            "  cacheKey: 8\n"
+            "\n"
             '"express@npm:4.18.2":\n'
-            '  version: 4.18.2\n'
+            "  version: 4.18.2\n"
             '  resolution: "express@npm:4.18.2"\n'
-            '  checksum: 10/abc123def456\n'
-            '\n'
+            "  checksum: 10/abc123def456\n"
+            "\n"
             '"lodash@npm:4.17.21":\n'
-            '  version: 4.17.21\n'
+            "  version: 4.17.21\n"
             '  resolution: "lodash@npm:4.17.21"\n'
-            '  checksum: 10/789xyz\n'
+            "  checksum: 10/789xyz\n"
         )
         tmpdir = tempfile.mkdtemp()
         try:
@@ -224,6 +245,7 @@ class TestYarnBerryChecksum:
             )
         finally:
             import shutil
+
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -232,8 +254,10 @@ class TestYarnLockBad:
         self.findings = _check_fixture_dir(YarnLockChecker(), "yarn_lock/bad")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for lodash missing integrity, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_finding_message_contains_package(self):
@@ -253,6 +277,7 @@ class TestYarnLockBad:
 # pnpm-lock.yaml
 # ---------------------------------------------------------------------------
 
+
 class TestPnpmLockGood:
     def test_all_integrity_no_findings(self):
         findings = _check_fixture_dir(PnpmLockChecker(), "pnpm_lock/good")
@@ -267,8 +292,10 @@ class TestPnpmLockBad:
         self.findings = _check_fixture_dir(PnpmLockChecker(), "pnpm_lock/bad")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for lodash missing integrity, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for lodash missing integrity, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_finding_message_contains_package(self):
@@ -288,16 +315,20 @@ class TestPnpmLockBad:
 # package.json lock file companion check tests
 # ---------------------------------------------------------------------------
 
-_PACKAGE_JSON_WITH_DEPS = json.dumps({
-    "name": "my-app",
-    "version": "1.0.0",
-    "dependencies": {"express": "4.18.2"},
-})
+_PACKAGE_JSON_WITH_DEPS = json.dumps(
+    {
+        "name": "my-app",
+        "version": "1.0.0",
+        "dependencies": {"express": "4.18.2"},
+    }
+)
 
-_PACKAGE_JSON_NO_DEPS = json.dumps({
-    "name": "my-app",
-    "version": "1.0.0",
-})
+_PACKAGE_JSON_NO_DEPS = json.dumps(
+    {
+        "name": "my-app",
+        "version": "1.0.0",
+    }
+)
 
 
 def _make_package_json(tmpdir, content):
@@ -384,11 +415,13 @@ class TestPackageJsonLockFileCheck:
 # package.json lock file cross-reference tests
 # ---------------------------------------------------------------------------
 
-_PACKAGE_JSON_TWO_DEPS = json.dumps({
-    "name": "my-app",
-    "version": "1.0.0",
-    "dependencies": {"express": "4.18.2", "lodash": "4.17.21"},
-})
+_PACKAGE_JSON_TWO_DEPS = json.dumps(
+    {
+        "name": "my-app",
+        "version": "1.0.0",
+        "dependencies": {"express": "4.18.2", "lodash": "4.17.21"},
+    }
+)
 
 
 class TestPackageJsonLockFileCrossRef:
@@ -402,8 +435,11 @@ class TestPackageJsonLockFileCrossRef:
                 "lockfileVersion": 3,
                 "packages": {
                     "": {"name": "my-app", "version": "1.0.0"},
-                    "node_modules/express": {"version": "4.18.2", "integrity": "sha512-abc"},
-                }
+                    "node_modules/express": {
+                        "version": "4.18.2",
+                        "integrity": "sha512-abc",
+                    },
+                },
             }
             with open(lock_path, "w") as fh:
                 json.dump(lock_data, fh)
@@ -427,9 +463,15 @@ class TestPackageJsonLockFileCrossRef:
                 "lockfileVersion": 3,
                 "packages": {
                     "": {"name": "my-app", "version": "1.0.0"},
-                    "node_modules/express": {"version": "4.18.2", "integrity": "sha512-abc"},
-                    "node_modules/lodash": {"version": "4.17.21", "integrity": "sha512-def"},
-                }
+                    "node_modules/express": {
+                        "version": "4.18.2",
+                        "integrity": "sha512-abc",
+                    },
+                    "node_modules/lodash": {
+                        "version": "4.17.21",
+                        "integrity": "sha512-def",
+                    },
+                },
             }
             with open(lock_path, "w") as fh:
                 json.dump(lock_data, fh)
@@ -448,11 +490,11 @@ class TestPackageJsonLockFileCrossRef:
             lock_path = os.path.join(tmpdir, "yarn.lock")
             with open(lock_path, "w") as fh:
                 fh.write(
-                    '# yarn lockfile v1\n'
-                    '\n'
-                    'express@4.18.2:\n'
+                    "# yarn lockfile v1\n"
+                    "\n"
+                    "express@4.18.2:\n"
                     '  version "4.18.2"\n'
-                    '  integrity sha512-abc\n'
+                    "  integrity sha512-abc\n"
                 )
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "yarn.lock"}}
@@ -471,11 +513,11 @@ class TestPackageJsonLockFileCrossRef:
             lock_path = os.path.join(tmpdir, "pnpm-lock.yaml")
             with open(lock_path, "w") as fh:
                 fh.write(
-                    'lockfileVersion: 5\n'
-                    '\n'
-                    'packages:\n'
-                    '  /express@4.18.2:\n'
-                    '    resolution: {integrity: sha512-abc}\n'
+                    "lockfileVersion: 5\n"
+                    "\n"
+                    "packages:\n"
+                    "  /express@4.18.2:\n"
+                    "    resolution: {integrity: sha512-abc}\n"
                 )
             checker = PackageJsonChecker()
             index = {tmpdir: {"package.json", "pnpm-lock.yaml"}}

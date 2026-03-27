@@ -16,6 +16,7 @@ def _index_from_dir(dirpath):
     checker = RequirementsChecker()
     patterns = set(checker.patterns)
     import fnmatch
+
     files = set()
     for fname in os.listdir(dirpath):
         for pat in patterns:
@@ -43,6 +44,7 @@ def _run_single(fixture_name):
 # Helpers to run checker on a single named fixture
 # ---------------------------------------------------------------------------
 
+
 def _check_fixture(fname):
     # type: (str) -> list
     """Run RequirementsChecker against a specific fixture file only."""
@@ -58,7 +60,9 @@ class TestRequirementsCheckerGood:
 
     def test_extras_syntax_no_findings(self):
         findings = _check_fixture("requirements-extras.txt")
-        assert findings == [], "package[extra]==1.0.0 --hash=... should produce 0 findings"
+        assert findings == [], (
+            "package[extra]==1.0.0 --hash=... should produce 0 findings"
+        )
 
     def test_comments_only_no_findings(self):
         findings = _check_fixture("requirements-comments_only.txt")
@@ -73,7 +77,9 @@ class TestRequirementsCheckerGood:
     def test_requirements_dev_filename_pattern(self):
         """requirements-dev.txt should be matched by the requirements*.txt pattern."""
         findings = _check_fixture("requirements-dev.txt")
-        assert findings == [], "requirements-dev.txt with valid pins+hashes should have 0 findings"
+        assert findings == [], (
+            "requirements-dev.txt with valid pins+hashes should have 0 findings"
+        )
 
 
 class TestRequirementsCheckerBad:
@@ -83,7 +89,9 @@ class TestRequirementsCheckerBad:
 
     def test_bad_file_unpinned_has_findings(self):
         findings = _check_fixture("requirements-bad.txt")
-        assert len(findings) >= 2, "flask>=2.0.0 and bare 'requests' and django~=4.2 should all produce findings"
+        assert len(findings) >= 2, (
+            "flask>=2.0.0 and bare 'requests' and django~=4.2 should all produce findings"
+        )
 
     def test_bad_file_ge_operator_is_error(self):
         findings = _check_fixture("requirements-bad.txt")
@@ -117,7 +125,9 @@ class TestRequirementsCheckerBad:
 class TestRequirementsCheckerNoHash:
     def test_no_hash_produces_findings(self):
         findings = _check_fixture("requirements-bad_no_hash.txt")
-        assert len(findings) == 3, "Three ==pins without --hash should each get a finding"
+        assert len(findings) == 3, (
+            "Three ==pins without --hash should each get a finding"
+        )
 
 
 class TestRequirementsCheckerMixed:
@@ -131,8 +141,12 @@ class TestRequirementsCheckerMixed:
         """flask==2.3.2 --hash=... and certifi==... --hash=... should be clean."""
         findings = _check_fixture("requirements-mixed.txt")
         msgs = [f.message for f in findings]
-        assert not any("flask" in m for m in msgs), "flask pinned+hash line should not produce findings"
-        assert not any("certifi" in m for m in msgs), "certifi pinned+hash line should not produce findings"
+        assert not any("flask" in m for m in msgs), (
+            "flask pinned+hash line should not produce findings"
+        )
+        assert not any("certifi" in m for m in msgs), (
+            "certifi pinned+hash line should not produce findings"
+        )
 
 
 class TestRequirementsCheckerEmptyDir:
@@ -161,27 +175,37 @@ class TestRequirementsCheckerPatterns:
     def test_patterns_include_glob(self):
         checker = RequirementsChecker()
         import fnmatch
+
         patterns = checker.patterns
         # requirements.txt, requirements-dev.txt, requirements-prod.txt should all match
-        for fname in ["requirements.txt", "requirements-dev.txt", "requirements-prod.txt",
-                      "requirements-test.txt"]:
-            assert any(fnmatch.fnmatch(fname, p) for p in patterns), \
+        for fname in [
+            "requirements.txt",
+            "requirements-dev.txt",
+            "requirements-prod.txt",
+            "requirements-test.txt",
+        ]:
+            assert any(fnmatch.fnmatch(fname, p) for p in patterns), (
                 "{} should match a requirements checker pattern".format(fname)
+            )
 
     def test_patterns_exclude_non_requirements(self):
         checker = RequirementsChecker()
         import fnmatch
+
         patterns = checker.patterns
         for fname in ["setup.py", "pyproject.toml", "Makefile"]:
-            assert not any(fnmatch.fnmatch(fname, p) for p in patterns), \
+            assert not any(fnmatch.fnmatch(fname, p) for p in patterns), (
                 "{} should NOT match requirements checker patterns".format(fname)
+            )
 
 
 class TestRequirementsCheckerPaths:
     def test_finding_path_is_relative(self):
         findings = _check_fixture("requirements-bad.txt")
         for f in findings:
-            assert not os.path.isabs(f.path), "Finding paths should be relative, not absolute"
+            assert not os.path.isabs(f.path), (
+                "Finding paths should be relative, not absolute"
+            )
 
     def test_finding_path_contains_filename(self):
         findings = _check_fixture("requirements-bad.txt")
@@ -225,7 +249,10 @@ class TestRequirementsCheckerPEP508:
         findings = self._check("lib @ git+https://github.com/example/lib.git@v0.3.0")
         assert len(findings) == 1
         assert "lib" in findings[0].message
-        assert "not pinned" in findings[0].message or "mutable" in findings[0].message.lower()
+        assert (
+            "not pinned" in findings[0].message
+            or "mutable" in findings[0].message.lower()
+        )
 
     def test_mutable_git_branch_flagged(self):
         """git+https://...@main is a branch — exactly 1 pin error."""
