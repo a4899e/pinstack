@@ -39,8 +39,25 @@ def lint(ctx: Context) -> None:
 
 @task
 def security(ctx: Context) -> None:
-    """Run security checks: bandit."""
+    """Run security checks: pinstack, bandit, pip-audit, detect-secrets."""
+    ctx.run("pinstack . --exclude-dir fixtures", pty=True)
     ctx.run("bandit -r pinstack/ -q", pty=True)
+    # pip-audit can't read uv.lock, so we export runtime-only deps to a requirements
+    # file it can consume. --no-dev excludes the build-chain dependency group.
+    # pinstack has no runtime deps today, so this produces an empty file — pip-audit
+    # passes with nothing to audit. If runtime deps are added later, they'll be
+    # audited automatically.
+    ctx.run(
+        "uv export --no-dev --no-emit-project --format requirements-txt"
+        " -o .runtime-deps.txt",
+        pty=True,
+    )
+    ctx.run(
+        "pip-audit --desc --require-hashes --disable-pip -r .runtime-deps.txt",
+        pty=True,
+    )
+    ctx.run("detect-secrets scan --baseline .secrets.baseline", pty=True)
+    ctx.run("detect-secrets audit --report .secrets.baseline", pty=True)
 
 
 @task
