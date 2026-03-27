@@ -9,11 +9,13 @@ from typing import Optional
 from pinstack.core import Checker, Finding, FileIndex
 
 # Sections in Cargo.toml that list dependencies
-_DEP_SECTION_NAMES = frozenset([
-    "dependencies",
-    "dev-dependencies",
-    "build-dependencies",
-])
+_DEP_SECTION_NAMES = frozenset(
+    [
+        "dependencies",
+        "dev-dependencies",
+        "build-dependencies",
+    ]
+)
 
 
 def _parse_cargo_toml_deps(path: str) -> list[str]:
@@ -41,7 +43,7 @@ def _parse_cargo_toml_deps(path: str) -> list[str]:
         if not in_dep_section:
             continue
         # Dependency line: "name = ..." or "name = { ... }"
-        m = re.match(r'^([A-Za-z0-9_\-]+)\s*=', line)
+        m = re.match(r"^([A-Za-z0-9_\-]+)\s*=", line)
         if m:
             deps.append(m.group(1))
 
@@ -54,7 +56,7 @@ def _parse_cargo_lock_names(lines: list[str]) -> set[str]:
     for raw_line in lines:
         line = raw_line.strip()
         if line.startswith("name = "):
-            names.add(line[len("name = "):].strip().strip('"'))
+            names.add(line[len("name = ") :].strip().strip('"'))
     return names
 
 
@@ -91,14 +93,23 @@ class CargoChecker(Checker):
             has_checksum = False
 
             def flush_package(findings_list: list[Finding], rp: str) -> None:
-                if in_package and is_registry_source and not has_checksum and pkg_name is not None:
-                    findings_list.append(Finding(
-                        checker="cargo",
-                        path=rp,
-                        line=pkg_line,
-                        message="package '{}' from registry is missing checksum".format(pkg_name),
-                        integrity=True,
-                    ))
+                if (
+                    in_package
+                    and is_registry_source
+                    and not has_checksum
+                    and pkg_name is not None
+                ):
+                    findings_list.append(
+                        Finding(
+                            checker="cargo",
+                            path=rp,
+                            line=pkg_line,
+                            message="package '{}' from registry is missing checksum".format(
+                                pkg_name
+                            ),
+                            integrity=True,
+                        )
+                    )
 
             for lineno, raw_line in enumerate(lines, start=1):
                 line = raw_line.strip()
@@ -116,9 +127,9 @@ class CargoChecker(Checker):
                     continue
 
                 if line.startswith("name = "):
-                    pkg_name = line[len("name = "):].strip().strip('"')
+                    pkg_name = line[len("name = ") :].strip().strip('"')
                 elif line.startswith("source = "):
-                    source_val = line[len("source = "):].strip().strip('"')
+                    source_val = line[len("source = ") :].strip().strip('"')
                     is_registry_source = source_val.startswith("registry+")
                 elif line.startswith("checksum = "):
                     has_checksum = True
@@ -134,15 +145,19 @@ class CargoChecker(Checker):
 
                 missing = [dep for dep in toml_deps if dep not in lock_names]
                 if missing:
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_lock,
-                        line=0,
-                        message="Cargo.lock is stale: missing {} ({})".format(
-                            "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                            ", ".join(sorted(missing)),
-                        ),
-                        integrity=True,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_lock,
+                            line=0,
+                            message="Cargo.lock is stale: missing {} ({})".format(
+                                "{} dependency".format(len(missing))
+                                if len(missing) == 1
+                                else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                            integrity=True,
+                        )
+                    )
 
         return findings

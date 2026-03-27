@@ -16,6 +16,7 @@ def _read_version() -> str:
         pass
     # Installed package without adjacent pyproject.toml (e.g. site-packages).
     from importlib.metadata import version, PackageNotFoundError
+
     try:
         return version("pinstack")
     except PackageNotFoundError:

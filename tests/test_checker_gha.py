@@ -27,8 +27,10 @@ def _check_empty():
 class TestGHAGood:
     def test_sha_pinned_no_findings(self):
         findings = _check("good")
-        assert findings == [], "All SHA-pinned refs should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "All SHA-pinned refs should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_local_action_skipped(self):
@@ -52,8 +54,10 @@ class TestGHABad:
         self.findings = _check("bad")
 
     def test_three_findings(self):
-        assert len(self.findings) == 3, "Expected 3 findings (2 tag refs + 1 docker), got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 3, (
+            "Expected 3 findings (2 tag refs + 1 docker), got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_checkout_v4_flagged(self):

@@ -47,14 +47,18 @@ def _find_dep_line(raw_lines: list[str], start_search: int) -> int:
     """Find the 0-based line index of the next <dependency> open tag at or after start_search."""
     for i in range(start_search, len(raw_lines)):
         stripped = raw_lines[i].strip()
-        if stripped.startswith("<dependency") and not stripped.startswith("<dependencies"):
+        if stripped.startswith("<dependency") and not stripped.startswith(
+            "<dependencies"
+        ):
             return i
     return 0
 
 
 class MavenChecker(Checker):
     name = "maven"
-    description = "Checks pom.xml for unpinned, dynamic, or SNAPSHOT dependency versions"
+    description = (
+        "Checks pom.xml for unpinned, dynamic, or SNAPSHOT dependency versions"
+    )
     patterns: list[str] = ["pom.xml"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
@@ -80,12 +84,14 @@ class MavenChecker(Checker):
                     # nosec B314 — see module docstring for rationale
                     root_elem = ET.fromstring(raw_content)  # nosec B314
                 except ET.ParseError:
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_path,
-                        line=0,
-                        message="pom.xml could not be parsed as XML",
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="pom.xml could not be parsed as XML",
+                        )
+                    )
                     continue
 
                 # Detect whether the POM uses the Maven namespace
@@ -118,8 +124,16 @@ class MavenChecker(Checker):
                         artifact_elem = dep_elem.find(artifact_tag)
                         ver_elem = dep_elem.find(ver_tag)
 
-                        group = group_elem.text.strip() if group_elem is not None and group_elem.text else "unknown"
-                        artifact = artifact_elem.text.strip() if artifact_elem is not None and artifact_elem.text else "unknown"
+                        group = (
+                            group_elem.text.strip()
+                            if group_elem is not None and group_elem.text
+                            else "unknown"
+                        )
+                        artifact = (
+                            artifact_elem.text.strip()
+                            if artifact_elem is not None and artifact_elem.text
+                            else "unknown"
+                        )
                         coord = "{}:{}".format(group, artifact)
 
                         # Find the line in raw text for this dependency block
@@ -129,12 +143,16 @@ class MavenChecker(Checker):
                         if ver_elem is None or ver_elem.text is None:
                             # No <version> element at all
                             line = dep_line_idx + 1  # 1-based
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=line,
-                                message="'{}' has no <version>; specify an explicit version".format(coord),
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=line,
+                                    message="'{}' has no <version>; specify an explicit version".format(
+                                        coord
+                                    ),
+                                )
+                            )
                             continue
 
                         version = ver_elem.text.strip()
@@ -147,15 +165,19 @@ class MavenChecker(Checker):
                             ver_line = _find_version_line(raw_lines, dep_line_idx)
                             if ver_line == 0:
                                 ver_line = dep_line_idx + 1
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=ver_line,
-                                message=(
-                                    "'{}' version uses property reference '{}' which cannot be"
-                                    " verified; consider using an explicit version".format(coord, version)
-                                ),
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=ver_line,
+                                    message=(
+                                        "'{}' version uses property reference '{}' which cannot be"
+                                        " verified; consider using an explicit version".format(
+                                            coord, version
+                                        )
+                                    ),
+                                )
+                            )
                             continue
 
                         # Determine line number of the <version> tag
@@ -165,32 +187,44 @@ class MavenChecker(Checker):
 
                         # Check for version ranges: contains [, ], (, )
                         if any(c in version for c in "[]()"):
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=ver_line,
-                                message="'{}' uses a version range '{}'; pin to an exact version".format(coord, version),
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=ver_line,
+                                    message="'{}' uses a version range '{}'; pin to an exact version".format(
+                                        coord, version
+                                    ),
+                                )
+                            )
                             continue
 
                         # LATEST or RELEASE
                         if version in ("LATEST", "RELEASE"):
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=ver_line,
-                                message="'{}' uses '{}'; pin to an exact version".format(coord, version),
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=ver_line,
+                                    message="'{}' uses '{}'; pin to an exact version".format(
+                                        coord, version
+                                    ),
+                                )
+                            )
                             continue
 
                         # SNAPSHOT versions
                         if version.endswith("-SNAPSHOT"):
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=ver_line,
-                                message="'{}' uses SNAPSHOT version '{}'; pin to a released version".format(coord, version),
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=ver_line,
+                                    message="'{}' uses SNAPSHOT version '{}'; pin to a released version".format(
+                                        coord, version
+                                    ),
+                                )
+                            )
                             continue
 
         return findings

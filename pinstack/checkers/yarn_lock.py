@@ -84,14 +84,18 @@ class YarnLockChecker(Checker):
 
                 for header, start_lineno, has_integrity in blocks:
                     if not has_integrity:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=start_lineno,
-                            message=(
-                                "'{}' is missing an integrity hash in yarn.lock".format(header)
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=start_lineno,
+                                message=(
+                                    "'{}' is missing an integrity hash in yarn.lock".format(
+                                        header
+                                    )
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

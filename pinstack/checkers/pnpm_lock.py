@@ -73,7 +73,9 @@ def _parse_pnpm_lock(lines: list[str]) -> list[tuple]:
 
 class PnpmLockChecker(Checker):
     name = "pnpm_lock"
-    description = "Checks pnpm-lock.yaml files for package entries missing integrity hashes"
+    description = (
+        "Checks pnpm-lock.yaml files for package entries missing integrity hashes"
+    )
     patterns: list[str] = ["pnpm-lock.yaml"]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
@@ -97,14 +99,18 @@ class PnpmLockChecker(Checker):
 
                 for pkg_key, start_lineno, has_integrity in blocks:
                     if not has_integrity:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=start_lineno,
-                            message=(
-                                "'{}' is missing an integrity hash in pnpm-lock.yaml".format(pkg_key)
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=start_lineno,
+                                message=(
+                                    "'{}' is missing an integrity hash in pnpm-lock.yaml".format(
+                                        pkg_key
+                                    )
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

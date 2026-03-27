@@ -36,6 +36,7 @@ def _check_empty(checker):
 # Dockerfile
 # ---------------------------------------------------------------------------
 
+
 class TestDockerfileGood:
     def test_sha256_pinned_no_findings(self):
         findings = _check_dockerfile("good")
@@ -50,8 +51,10 @@ class TestDockerfileBad:
         self.findings = _check_dockerfile("bad")
 
     def test_two_findings(self):
-        assert len(self.findings) == 2, "Expected 2 findings (python:3.11 and ubuntu:22.04), got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 2, (
+            "Expected 2 findings (python:3.11 and ubuntu:22.04), got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_has_two_findings(self):
@@ -144,6 +147,7 @@ class TestDockerfilePlatformFlag:
 # Compose
 # ---------------------------------------------------------------------------
 
+
 class TestComposeGood:
     def test_sha256_pinned_no_findings(self):
         findings = _check_compose("compose_good")
@@ -158,8 +162,10 @@ class TestComposeBad:
         self.findings = _check_compose("compose_bad")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for nginx:1.25.0, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for nginx:1.25.0, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_nginx_flagged(self):
@@ -182,8 +188,10 @@ class TestComposeBuildDirective:
     def test_build_section_not_image_not_flagged(self):
         """build: lines should not be matched as image: lines."""
         findings = _check_compose("compose_build")
-        assert findings == [], "build: directive should not produce findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "build: directive should not produce findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 

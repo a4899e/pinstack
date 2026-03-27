@@ -47,15 +47,19 @@ class PackageLockChecker(Checker):
                         if pkg_data.get("link") is True:
                             continue
                         if "integrity" not in pkg_data:
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=0,
-                                message=(
-                                    "'{}' is missing an integrity hash in package-lock.json".format(pkg_key)
-                                ),
-                                integrity=True,
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=0,
+                                    message=(
+                                        "'{}' is missing an integrity hash in package-lock.json".format(
+                                            pkg_key
+                                        )
+                                    ),
+                                    integrity=True,
+                                )
+                            )
                 else:
                     # v1 format: recursive "dependencies" map keyed by package name
                     dependencies = data.get("dependencies")
@@ -64,22 +68,28 @@ class PackageLockChecker(Checker):
 
         return findings
 
-    def _check_v1_deps(self, deps: dict, rel_path: str, findings: list[Finding]) -> None:
+    def _check_v1_deps(
+        self, deps: dict, rel_path: str, findings: list[Finding]
+    ) -> None:
         """Recursively walk a v1 lockfile dependencies dict, appending findings."""
         for pkg_name in sorted(deps.keys()):
             pkg_data = deps[pkg_name]
             if not isinstance(pkg_data, dict):
                 continue
             if "integrity" not in pkg_data:
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message=(
-                        "'{}' is missing an integrity hash in package-lock.json".format(pkg_name)
-                    ),
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message=(
+                            "'{}' is missing an integrity hash in package-lock.json".format(
+                                pkg_name
+                            )
+                        ),
+                        integrity=True,
+                    )
+                )
             # Recurse into nested dependencies (bundled/hoisted)
             nested = pkg_data.get("dependencies")
             if nested and isinstance(nested, dict):

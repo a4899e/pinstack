@@ -33,6 +33,7 @@ def _empty_dir():
 # --version
 # ---------------------------------------------------------------------------
 
+
 class TestVersionFlag:
     def test_version_flag(self):
         result = _run(["--version"])
@@ -45,6 +46,7 @@ class TestVersionFlag:
 # ---------------------------------------------------------------------------
 # --list-checkers
 # ---------------------------------------------------------------------------
+
 
 class TestListCheckers:
     def test_list_checkers_exits_zero(self):
@@ -61,6 +63,7 @@ class TestListCheckers:
 # Mutually exclusive --check / --exclude
 # ---------------------------------------------------------------------------
 
+
 class TestCheckExcludeMutex:
     def test_check_and_exclude_mutually_exclusive(self):
         d = _empty_dir()
@@ -69,12 +72,14 @@ class TestCheckExcludeMutex:
             assert result.returncode == 2
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # Text format (default)
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultFormatText:
     def test_empty_dir_shows_zero_findings(self):
@@ -85,6 +90,7 @@ class TestDefaultFormatText:
             assert "0 findings" in result.stdout
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_default_format_is_text(self):
@@ -93,15 +99,21 @@ class TestDefaultFormatText:
             result = _run([d])
             assert result.returncode == 0
             # Text output always ends with a summary line
-            assert "findings" in result.stdout or "error" in result.stdout or "warning" in result.stdout
+            assert (
+                "findings" in result.stdout
+                or "error" in result.stdout
+                or "warning" in result.stdout
+            )
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # SARIF format
 # ---------------------------------------------------------------------------
+
 
 class TestSarifFormat:
     def test_sarif_valid_json(self):
@@ -113,6 +125,7 @@ class TestSarifFormat:
             assert "$schema" in data
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_sarif_schema_url(self):
@@ -124,6 +137,7 @@ class TestSarifFormat:
             assert "sarif" in data["$schema"].lower()
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_sarif_version_field(self):
@@ -134,6 +148,7 @@ class TestSarifFormat:
             assert data["version"] == "2.1.0"
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_sarif_runs_structure(self):
@@ -149,12 +164,14 @@ class TestSarifFormat:
             assert run["tool"]["driver"]["name"] == "pinstack"
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # --exit-zero
 # ---------------------------------------------------------------------------
+
 
 class TestExitZeroFlag:
     def test_exit_zero_accepted(self):
@@ -164,6 +181,7 @@ class TestExitZeroFlag:
             assert result.returncode == 0
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_exit_zero_no_crash(self):
@@ -173,12 +191,14 @@ class TestExitZeroFlag:
             assert "Traceback" not in result.stderr
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # Unknown checker name
 # ---------------------------------------------------------------------------
+
 
 class TestUnknownCheckerName:
     def test_unknown_checker_exits_2(self):
@@ -188,21 +208,27 @@ class TestUnknownCheckerName:
             assert result.returncode == 2
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_unknown_checker_message_in_stderr(self):
         d = _empty_dir()
         try:
             result = _run(["--check", "no_such_checker_xyz", d])
-            assert "Unknown checker" in result.stderr or "unknown checker" in result.stderr.lower()
+            assert (
+                "Unknown checker" in result.stderr
+                or "unknown checker" in result.stderr.lower()
+            )
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # Non-existent path
 # ---------------------------------------------------------------------------
+
 
 class TestNonexistentPath:
     def test_nonexistent_path_exits_2(self):
@@ -218,6 +244,7 @@ class TestNonexistentPath:
 # --max-depth flag
 # ---------------------------------------------------------------------------
 
+
 class TestMaxDepthFlag:
     def test_max_depth_accepted(self):
         d = _empty_dir()
@@ -227,6 +254,7 @@ class TestMaxDepthFlag:
             assert "Traceback" not in result.stderr
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_max_depth_1(self):
@@ -236,12 +264,14 @@ class TestMaxDepthFlag:
             assert result.returncode == 0
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 # --max-files flag
 # ---------------------------------------------------------------------------
+
 
 class TestMaxFilesFlag:
     def test_max_files_accepted(self):
@@ -252,6 +282,7 @@ class TestMaxFilesFlag:
             assert "Traceback" not in result.stderr
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_max_files_small_value(self):
@@ -261,4 +292,5 @@ class TestMaxFilesFlag:
             assert result.returncode == 0
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)

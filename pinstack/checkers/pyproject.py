@@ -16,33 +16,37 @@ _SECTION_DEP_GROUPS = "dependency-groups"
 # Poetry section prefixes
 _POETRY_DEPS_SECTION = "tool.poetry.dependencies"
 _POETRY_DEV_DEPS_SECTION = "tool.poetry.dev-dependencies"
-_POETRY_GROUP_DEPS_RE = re.compile(r'^tool\.poetry\.group\.[^.]+\.dependencies$')
+_POETRY_GROUP_DEPS_RE = re.compile(r"^tool\.poetry\.group\.[^.]+\.dependencies$")
 
 # Matches a TOML section header like [project] or [project.optional-dependencies]
-_SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]')
+_SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]")
 
 # Matches a key = [ start of an array assignment (bare or quoted keys)
-_ARRAY_START_RE = re.compile(r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.\-]+))\s*=\s*\[')
+_ARRAY_START_RE = re.compile(
+    r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.\-]+))\s*=\s*\['
+)
 
 # Operators that are NOT ==
-_BAD_OPERATORS_RE = re.compile(r'(!=|~=|>=|<=|>(?!=)|<(?!=))')
+_BAD_OPERATORS_RE = re.compile(r"(!=|~=|>=|<=|>(?!=)|<(?!=))")
 
 # Matches a PEP 508 dependency specifier (simplified):
 #   name[extras] operator version ; marker
 # We only need: name + first operator + version
 _DEP_RE = re.compile(
-    r'^([A-Za-z0-9_.\-]+(?:\[[A-Za-z0-9_.,\s]+\])?)'   # package name + optional extras
-    r'\s*'
-    r'(==|!=|~=|>=|<=|>|<)?'                              # optional operator
-    r'\s*'
-    r'([^\s;,\]]*)'                                        # optional version
+    r"^([A-Za-z0-9_.\-]+(?:\[[A-Za-z0-9_.,\s]+\])?)"  # package name + optional extras
+    r"\s*"
+    r"(==|!=|~=|>=|<=|>|<)?"  # optional operator
+    r"\s*"
+    r"([^\s;,\]]*)"  # optional version
 )
 
 
 def _extract_string_value(raw: str) -> str:
     """Strip surrounding quotes from a TOML string value."""
     s = raw.strip().strip(",").strip()
-    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+    if (s.startswith('"') and s.endswith('"')) or (
+        s.startswith("'") and s.endswith("'")
+    ):
         return s[1:-1]
     return s
 
@@ -57,7 +61,7 @@ def _strip_inline_comment(line: str) -> str:
             in_double = not in_double
         elif ch == "'" and not in_double:
             in_single = not in_single
-        elif ch == '#' and not in_single and not in_double:
+        elif ch == "#" and not in_single and not in_double:
             return line[:i]
     return line
 
@@ -79,11 +83,11 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
     section header are ignored.
     """
     results: list[tuple[list[str], str]] = []
-    current_section = ""   # current TOML section name
-    in_dep_array = False   # are we inside a target dependency array?
+    current_section = ""  # current TOML section name
+    in_dep_array = False  # are we inside a target dependency array?
     current_deps: list[str] = []
-    current_label = ""     # label for the current array
-    array_depth = 0        # bracket nesting depth (to handle inline arrays properly)
+    current_label = ""  # label for the current array
+    array_depth = 0  # bracket nesting depth (to handle inline arrays properly)
 
     lines = content.splitlines()
 
@@ -164,7 +168,7 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
             continue
 
         # Find the content after the opening [
-        after_bracket = stripped[array_match.end():]  # everything after '['
+        after_bracket = stripped[array_match.end() :]  # everything after '['
         # Strip inline comment from the remainder
         after_bracket = _strip_inline_comment(after_bracket)
 
@@ -211,10 +215,10 @@ def _parse_array_items_from_line(text: str) -> list[str]:
     in_inline_table = 0  # brace nesting depth
     while i < len(text):
         ch = text[i]
-        if ch == '{':
+        if ch == "{":
             in_inline_table += 1
             i += 1
-        elif ch == '}':
+        elif ch == "}":
             in_inline_table = max(0, in_inline_table - 1)
             i += 1
         elif in_inline_table:
@@ -223,10 +227,10 @@ def _parse_array_items_from_line(text: str) -> list[str]:
             quote = ch
             j = i + 1
             while j < len(text) and text[j] != quote:
-                if text[j] == '\\':
+                if text[j] == "\\":
                     j += 1  # skip escaped char
                 j += 1
-            tokens.append(text[i:j + 1])
+            tokens.append(text[i : j + 1])
             i = j + 1
         else:
             i += 1
@@ -241,14 +245,14 @@ def _is_poetry_dep_section(section: str) -> bool:
 
 
 # Matches a simple key = "value" TOML assignment (no array)
-_TOML_KV_RE = re.compile(r'^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+)$')
+_TOML_KV_RE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+)$")
 
 # Matches an inline table: { version = "...", ... }
 _INLINE_TABLE_VERSION_RE = re.compile(r'version\s*=\s*["\']([^"\']+)["\']')
 
 # Operators that are NOT exact pins in Poetry
 # Acceptable: ==x.y.z or a bare x.y.z (no operator)
-_POETRY_BAD_CONSTRAINT_RE = re.compile(r'^(\^|~|>=|>(?!=)|<=|<(?!=)|!=|\*)')
+_POETRY_BAD_CONSTRAINT_RE = re.compile(r"^(\^|~|>=|>(?!=)|<=|<(?!=)|!=|\*)")
 
 
 def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
@@ -274,8 +278,11 @@ def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
         return True, "'{}' has empty == constraint; use exact pinning".format(pkg)
 
     if _POETRY_BAD_CONSTRAINT_RE.match(v):
-        return True, "'{}' uses '{}' instead of exact pinning; use ==<version> or a bare version".format(
-            pkg, v
+        return (
+            True,
+            "'{}' uses '{}' instead of exact pinning; use ==<version> or a bare version".format(
+                pkg, v
+            ),
         )
 
     # Bare version (no operator) — treat as exact in Poetry
@@ -364,18 +371,24 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
         if "git+" in url_part or "git://" in url_part:
             at_pos = url_part.rfind("@")
             if at_pos >= 0:
-                ref = url_part[at_pos + 1:]
-                if re.match(r'^[0-9a-f]{40}$', ref):
+                ref = url_part[at_pos + 1 :]
+                if re.match(r"^[0-9a-f]{40}$", ref):
                     return False, ""
             pkg_name = dep.split(" @ ", 1)[0].strip()
-            return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(pkg_name)
+            return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(
+                pkg_name
+            )
         # Archive/HTTP URLs: validate hash fragments
         pkg_name = dep.split(" @ ", 1)[0].strip()
         hash_errors = validate_url_fragment_hashes(url_part)
         if not hash_errors:
             return False, ""
-        return True, "'{}' uses a URL reference without valid hash verification ({})".format(
-            pkg_name, "; ".join(hash_errors),
+        return (
+            True,
+            "'{}' uses a URL reference without valid hash verification ({})".format(
+                pkg_name,
+                "; ".join(hash_errors),
+            ),
         )
 
     m = _DEP_RE.match(dep)
@@ -393,17 +406,21 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
     if not operator and not version:
         return True, "'{}' is not pinned; use {}==<version>".format(pkg_name, pkg_name)
 
-    return True, "'{}' uses '{}' instead of '=='; use exact pinning".format(dep.split(";")[0].strip(), operator)
+    return True, "'{}' uses '{}' instead of '=='; use exact pinning".format(
+        dep.split(";")[0].strip(), operator
+    )
 
 
 # Lock files that provide hash verification for pyproject.toml dependencies.
 # requirements*.txt is matched dynamically via fnmatch (covers requirements.txt,
 # requirements-dev.txt, requirements-prod.txt, etc.).
-_LOCK_FILES_EXACT = frozenset([
-    "poetry.lock",
-    "pdm.lock",
-    "uv.lock",
-])
+_LOCK_FILES_EXACT = frozenset(
+    [
+        "poetry.lock",
+        "pdm.lock",
+        "uv.lock",
+    ]
+)
 
 
 def _is_requirements_lock(filename: str) -> bool:
@@ -417,7 +434,7 @@ def _normalize_python_name(name: str) -> str:
     bracket = name.find("[")
     if bracket >= 0:
         name = name[:bracket]
-    return re.sub(r'[-._]+', '_', name.strip().lower())
+    return re.sub(r"[-._]+", "_", name.strip().lower())
 
 
 def _extract_name_from_dep(dep: str) -> str:
@@ -426,7 +443,7 @@ def _extract_name_from_dep(dep: str) -> str:
     if m:
         return m.group(1)
     # Fallback: take everything before first operator/space/semicolon
-    for ch in ('>', '<', '=', '!', '~', ';', ' ', '['):
+    for ch in (">", "<", "=", "!", "~", ";", " ", "["):
         pos = dep.find(ch)
         if pos >= 0:
             return dep[:pos]
@@ -465,10 +482,14 @@ def _extract_lock_file_names(full_path: str, lock_filename: str) -> set[str]:
 
 class PyprojectChecker(Checker):
     name = "pyproject"
-    description = (
-        "Checks pyproject.toml [project], [dependency-groups], and [tool.poetry] dependencies for == exact pinning"
-    )
-    patterns: list[str] = ["pyproject.toml", "requirements*.txt", "poetry.lock", "pdm.lock", "uv.lock"]
+    description = "Checks pyproject.toml [project], [dependency-groups], and [tool.poetry] dependencies for == exact pinning"
+    patterns: list[str] = [
+        "pyproject.toml",
+        "requirements*.txt",
+        "poetry.lock",
+        "pdm.lock",
+        "uv.lock",
+    ]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
@@ -503,12 +524,14 @@ class PyprojectChecker(Checker):
 
                     lineno = _find_dep_line(raw_lines, dep)
 
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_path,
-                        line=lineno,
-                        message=msg,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=lineno,
+                            message=msg,
+                        )
+                    )
 
             # Check each Poetry dep for exact pinning
             for pkg, version, lineno in poetry_deps:
@@ -516,12 +539,14 @@ class PyprojectChecker(Checker):
                     has_deps = True
                 is_bad, msg = _check_poetry_version(pkg, version)
                 if is_bad:
-                    findings.append(Finding(
-                        checker=self.name,
-                        path=rel_path,
-                        line=lineno,
-                        message=msg,
-                    ))
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=lineno,
+                            message=msg,
+                        )
+                    )
 
             # Check for companion lock file with hash verification.
             # Collect lock files.  For requirements*.txt, only count files
@@ -536,13 +561,15 @@ class PyprojectChecker(Checker):
             has_lock_files = bool(lock_names) or bool(exact_lock_files)
 
             if has_deps and not has_lock_files:
-                findings.append(Finding(
-                    checker=self.name,
-                    path=rel_path,
-                    line=0,
-                    message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
-                    integrity=True,
-                ))
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=0,
+                        message="pyproject.toml has dependencies but no lock file with hash verification (requirements.txt, poetry.lock, pdm.lock, or uv.lock)",
+                        integrity=True,
+                    )
+                )
             elif has_deps and has_lock_files:
                 if lock_names:
                     missing: list[str] = []
@@ -557,16 +584,20 @@ class PyprojectChecker(Checker):
                         if normalized not in lock_names:
                             missing.append(normalized)
                     if missing:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=0,
-                            message="lock files are stale: missing {} ({})".format(
-                                "{} dependency".format(len(missing)) if len(missing) == 1 else "{} dependencies".format(len(missing)),
-                                ", ".join(sorted(missing)),
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=0,
+                                message="lock files are stale: missing {} ({})".format(
+                                    "{} dependency".format(len(missing))
+                                    if len(missing) == 1
+                                    else "{} dependencies".format(len(missing)),
+                                    ", ".join(sorted(missing)),
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings
 

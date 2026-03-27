@@ -22,8 +22,10 @@ def _check_empty():
 class TestTerraformGood:
     def test_all_providers_have_h1_no_findings(self):
         findings = _check("good")
-        assert findings == [], "All providers with h1: hashes should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "All providers with h1: hashes should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_no_lock_file_no_findings(self):
@@ -35,8 +37,10 @@ class TestTerraformBadMissingH1:
         self.findings = _check("bad_missing_h1")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for provider missing h1:, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for provider missing h1:, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_has_one_finding(self):
@@ -60,8 +64,10 @@ class TestTerraformMultiProvider:
         self.findings = _check("multi_provider")
 
     def test_one_finding_only_null_missing(self):
-        assert len(self.findings) == 1, "Expected 1 finding for null provider missing h1:, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for null provider missing h1:, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_null_provider_flagged(self):

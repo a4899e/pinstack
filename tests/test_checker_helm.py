@@ -33,8 +33,10 @@ def _check_empty():
 class TestHelmGood:
     def test_chart_yaml_with_lock_and_digest_no_findings(self):
         findings = _check("good")
-        assert findings == [], "Chart.yaml with deps + Chart.lock with digest should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "Chart.yaml with deps + Chart.lock with digest should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_no_chart_files_no_findings(self):
@@ -42,8 +44,10 @@ class TestHelmGood:
 
     def test_chart_yaml_without_dependencies_no_findings(self):
         findings = _check("no_deps")
-        assert findings == [], "Chart.yaml without dependencies section should produce 0 findings, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "Chart.yaml without dependencies section should produce 0 findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
 
@@ -52,8 +56,10 @@ class TestHelmNoLock:
         self.findings = _check("no_lock")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for missing Chart.lock, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for missing Chart.lock, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_has_one_finding(self):
@@ -74,8 +80,10 @@ class TestHelmBadDigest:
         self.findings = _check("bad_digest")
 
     def test_one_finding(self):
-        assert len(self.findings) == 1, "Expected 1 finding for missing digest, got {}: {}".format(
-            len(self.findings), [f.message for f in self.findings]
+        assert len(self.findings) == 1, (
+            "Expected 1 finding for missing digest, got {}: {}".format(
+                len(self.findings), [f.message for f in self.findings]
+            )
         )
 
     def test_has_one_finding(self):
@@ -97,6 +105,7 @@ class TestHelmCrossRef:
     def _make_index(self, chart_yaml_content, chart_lock_content=None):
         # type: (str, str) -> list
         import tempfile
+
         d = tempfile.mkdtemp()
         chart_yaml = os.path.join(d, "Chart.yaml")
         with open(chart_yaml, "w") as fh:
@@ -116,16 +125,16 @@ class TestHelmCrossRef:
             "name: my-app\n"
             "dependencies:\n"
             "  - name: nginx\n"
-            "    version: \"15.0.0\"\n"
+            '    version: "15.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
         )
         chart_lock = (
             "dependencies:\n"
             "- name: redis\n"
-            "  version: \"17.0.0\"\n"
+            '  version: "17.0.0"\n'
             "  repository: https://charts.bitnami.com/bitnami\n"
             "  digest: sha256:abc123\n"
-            "generated: \"2024-01-01T00:00:00Z\"\n"
+            'generated: "2024-01-01T00:00:00Z"\n'
         )
         findings = self._make_index(chart_yaml, chart_lock)
         cross_ref = [f for f in findings if "stale" in f.message]
@@ -141,21 +150,23 @@ class TestHelmCrossRef:
             "name: my-app\n"
             "dependencies:\n"
             "  - name: nginx\n"
-            "    version: \"15.0.0\"\n"
+            '    version: "15.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
         )
         chart_lock = (
             "dependencies:\n"
             "- name: nginx\n"
-            "  version: \"15.0.0\"\n"
+            '  version: "15.0.0"\n'
             "  repository: https://charts.bitnami.com/bitnami\n"
             "  digest: sha256:abc123\n"
-            "generated: \"2024-01-01T00:00:00Z\"\n"
+            'generated: "2024-01-01T00:00:00Z"\n'
         )
         findings = self._make_index(chart_yaml, chart_lock)
         cross_ref = [f for f in findings if "stale" in f.message]
-        assert cross_ref == [], "All deps present in lock — expected no cross-ref findings, got: {}".format(
-            [f.message for f in findings]
+        assert cross_ref == [], (
+            "All deps present in lock — expected no cross-ref findings, got: {}".format(
+                [f.message for f in findings]
+            )
         )
 
     def test_top_level_digest_accepted(self):
@@ -165,23 +176,23 @@ class TestHelmCrossRef:
             "name: my-app\n"
             "dependencies:\n"
             "  - name: nginx\n"
-            "    version: \"15.0.0\"\n"
+            '    version: "15.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
             "  - name: redis\n"
-            "    version: \"17.0.0\"\n"
+            '    version: "17.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
         )
         # Top-level digest covers both deps — no per-dep digests present
         chart_lock = (
             "dependencies:\n"
             "- name: nginx\n"
-            "  version: \"15.0.0\"\n"
+            '  version: "15.0.0"\n'
             "  repository: https://charts.bitnami.com/bitnami\n"
             "- name: redis\n"
-            "  version: \"17.0.0\"\n"
+            '  version: "17.0.0"\n'
             "  repository: https://charts.bitnami.com/bitnami\n"
             "digest: sha256:toplevelabc123\n"
-            "generated: \"2024-01-01T00:00:00Z\"\n"
+            'generated: "2024-01-01T00:00:00Z"\n'
         )
         d = tempfile.mkdtemp()
         try:
@@ -206,23 +217,25 @@ class TestHelmCrossRef:
             "name: my-app\n"
             "dependencies:\n"
             "  - name: nginx\n"
-            "    version: \"15.0.0\"\n"
+            '    version: "15.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
             "  - name: redis\n"
-            "    version: \"17.0.0\"\n"
+            '    version: "17.0.0"\n'
             "    repository: https://charts.bitnami.com/bitnami\n"
         )
         chart_lock = (
             "dependencies:\n"
             "- name: nginx\n"
-            "  version: \"15.0.0\"\n"
+            '  version: "15.0.0"\n'
             "  repository: https://charts.bitnami.com/bitnami\n"
             "  digest: sha256:abc123\n"
-            "generated: \"2024-01-01T00:00:00Z\"\n"
+            'generated: "2024-01-01T00:00:00Z"\n'
         )
         findings = self._make_index(chart_yaml, chart_lock)
         cross_ref = [f for f in findings if "stale" in f.message]
-        assert len(cross_ref) == 1, "Expected 1 cross-ref finding for missing redis, got: {}".format(
-            [f.message for f in findings]
+        assert len(cross_ref) == 1, (
+            "Expected 1 cross-ref finding for missing redis, got: {}".format(
+                [f.message for f in findings]
+            )
         )
         assert "redis" in cross_ref[0].message

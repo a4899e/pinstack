@@ -277,45 +277,38 @@ pinstack . --exclude-dir vendor,third_party,checkouts
 ## Contributing
 
 1. Fork the repository at https://github.com/a4899e/pinstack
-2. Create a branch from `develop` (not `main`)
+2. Create a branch from `main`
 3. Add tests for any new checker or behaviour
-4. Open a pull request against `develop`
+4. Open a pull request against `main`
 
-Development setup:
-
-```
-./scripts/setup-dev.sh
-source .venv/bin/activate
-```
-
-Or manually:
+Development setup (requires Python 3.10+ and [uv](https://docs.astral.sh/uv/)):
 
 ```
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-git config core.hooksPath .githooks
+./scripts/dev-setup.sh
 ```
+
+> **Note:** pinstack *runs* on Python 3.9+, but *development* requires 3.10+
+> because some build-chain tools (bandit) need it.
 
 ### Running Tests
 
-After running `./scripts/setup-dev.sh` (or the manual steps above):
-
 ```
-source .venv/bin/activate
-invoke test                              # run the full test suite
-python -m pytest tests/ -v               # or run pytest directly
-python -m pytest tests/test_checker_go.py # run a single test file
+uv run inv test                              # run the full test suite
+uv run python -m pytest tests/ -v            # or run pytest directly
+uv run python -m pytest tests/test_checker_go.py  # run a single test file
 ```
 
 ### Build Pipeline
 
-The pre-commit hook runs `invoke build` before each commit. You can also
+The pre-commit hook runs `uv run inv build` before each commit. You can also
 run it manually:
 
 ```
-invoke build     # tests + ruff + pyright + bandit
-invoke clean     # remove .pyc, caches, build artifacts
+uv run inv lint          # ruff check + ruff format --check + pyright
+uv run inv security      # pinstack self-scan + bandit + pip-audit + detect-secrets
+uv run inv test          # pytest
+uv run inv build         # clean + lint + security + test (full CI gate)
+uv run inv clean         # remove .pyc, caches, build artifacts
 ```
 
 ---

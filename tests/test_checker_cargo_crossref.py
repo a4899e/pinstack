@@ -47,18 +47,21 @@ checksum = "e28c57fca5f9df1c44e3b4cd1aaff6c63f1a9f2de0e24c53f6a0e64e8c84e71b"
 class TestDepInCargoTomlMissingFromLock:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Cargo.toml": (
-                "[package]\n"
-                "name = \"myapp\"\n"
-                "version = \"0.1.0\"\n"
-                "\n"
-                "[dependencies]\n"
-                "serde = \"1.0\"\n"
-                "missing_crate = \"0.5\"\n"
-            ),
-            "Cargo.lock": CARGO_LOCK_SERDE_ONLY,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Cargo.toml": (
+                    "[package]\n"
+                    'name = "myapp"\n'
+                    'version = "0.1.0"\n'
+                    "\n"
+                    "[dependencies]\n"
+                    'serde = "1.0"\n'
+                    'missing_crate = "0.5"\n'
+                ),
+                "Cargo.lock": CARGO_LOCK_SERDE_ONLY,
+            },
+        )
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dep_in_cargo_toml_missing_from_lock(self):
@@ -88,18 +91,21 @@ class TestDepInCargoTomlMissingFromLock:
 class TestDepInCargoTomlPresentInLock:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Cargo.toml": (
-                "[package]\n"
-                "name = \"myapp\"\n"
-                "version = \"0.1.0\"\n"
-                "\n"
-                "[dependencies]\n"
-                "serde = \"1.0\"\n"
-                "tokio = { version = \"1.0\", features = [\"full\"] }\n"
-            ),
-            "Cargo.lock": CARGO_LOCK_WITH_SERDE,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Cargo.toml": (
+                    "[package]\n"
+                    'name = "myapp"\n'
+                    'version = "0.1.0"\n'
+                    "\n"
+                    "[dependencies]\n"
+                    'serde = "1.0"\n'
+                    'tokio = { version = "1.0", features = ["full"] }\n'
+                ),
+                "Cargo.lock": CARGO_LOCK_WITH_SERDE,
+            },
+        )
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dep_in_cargo_toml_present_in_lock(self):
@@ -114,20 +120,23 @@ class TestDepInCargoTomlPresentInLock:
 class TestDevDepsChecked:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "Cargo.toml": (
-                "[package]\n"
-                "name = \"myapp\"\n"
-                "version = \"0.1.0\"\n"
-                "\n"
-                "[dependencies]\n"
-                "serde = \"1.0\"\n"
-                "\n"
-                "[dev-dependencies]\n"
-                "criterion = \"0.5\"\n"
-            ),
-            "Cargo.lock": CARGO_LOCK_SERDE_ONLY,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Cargo.toml": (
+                    "[package]\n"
+                    'name = "myapp"\n'
+                    'version = "0.1.0"\n'
+                    "\n"
+                    "[dependencies]\n"
+                    'serde = "1.0"\n'
+                    "\n"
+                    "[dev-dependencies]\n"
+                    'criterion = "0.5"\n'
+                ),
+                "Cargo.lock": CARGO_LOCK_SERDE_ONLY,
+            },
+        )
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_dev_deps_checked(self):
@@ -142,9 +151,12 @@ class TestNoCargoToml:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         # Only Cargo.lock present — no Cargo.toml, so no cross-ref checks
-        index = _make_index(self.tmpdir, {
-            "Cargo.lock": CARGO_LOCK_WITH_SERDE,
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "Cargo.lock": CARGO_LOCK_WITH_SERDE,
+            },
+        )
         self.findings = CargoChecker().check(index, self.tmpdir)
 
     def test_no_cargo_toml(self):

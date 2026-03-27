@@ -10,12 +10,12 @@ from pinstack.core import Checker, Finding, FileIndex
 
 # Matches: FROM [--platform=<platform>] <image> [AS <name>]
 # Group 1: image reference
-_FROM_RE = re.compile(r'^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+\S+)?\s*$', re.IGNORECASE)
+_FROM_RE = re.compile(r"^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+\S+)?\s*$", re.IGNORECASE)
 
 
 def _is_build_stage_alias(image: str) -> bool:
     """Return True if image looks like a bare stage alias (no :, @, ., /)."""
-    return not any(c in image for c in (':', '@', '.', '/'))
+    return not any(c in image for c in (":", "@", ".", "/"))
 
 
 class DockerfileChecker(Checker):
@@ -58,12 +58,16 @@ class DockerfileChecker(Checker):
 
                     # Require @sha256:
                     if "@sha256:" not in image:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="FROM '{}' is not pinned with @sha256: digest".format(image),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="FROM '{}' is not pinned with @sha256: digest".format(
+                                    image
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

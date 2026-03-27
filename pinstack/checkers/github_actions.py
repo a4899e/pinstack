@@ -9,10 +9,10 @@ import re
 from pinstack.core import Checker, Finding, FileIndex
 
 # Matches lines containing uses: <ref>
-_USES_RE = re.compile(r'^\s*-?\s*uses:\s*(\S+)')
+_USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
 
 # A 40-character lowercase hex SHA
-_SHA_RE = re.compile(r'^[0-9a-f]{40}$')
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # Workflow files live under .github/workflows/ (any depth above that)
 _WORKFLOW_PATH_PARTS = (".github", "workflows")
@@ -67,36 +67,46 @@ class GitHubActionsChecker(Checker):
                     # docker:// refs must use @sha256: digest
                     if ref.startswith("docker://"):
                         if "@sha256:" not in ref:
-                            findings.append(Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=lineno,
-                                message="docker action '{}' is not pinned with @sha256: digest".format(ref),
-                                integrity=True,
-                            ))
+                            findings.append(
+                                Finding(
+                                    checker=self.name,
+                                    path=rel_path,
+                                    line=lineno,
+                                    message="docker action '{}' is not pinned with @sha256: digest".format(
+                                        ref
+                                    ),
+                                    integrity=True,
+                                )
+                            )
                         continue
 
                     # Check for @ separator
                     if "@" not in ref:
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="action '{}' has no @ ref; pin to a full-length SHA".format(ref),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="action '{}' has no @ ref; pin to a full-length SHA".format(
+                                    ref
+                                ),
+                                integrity=True,
+                            )
+                        )
                         continue
 
                     action_part, pin = ref.rsplit("@", 1)
                     if not _SHA_RE.match(pin):
-                        findings.append(Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message="action '{}' is not pinned to a full-length SHA (got '{}')".format(
-                                action_part, pin
-                            ),
-                            integrity=True,
-                        ))
+                        findings.append(
+                            Finding(
+                                checker=self.name,
+                                path=rel_path,
+                                line=lineno,
+                                message="action '{}' is not pinned to a full-length SHA (got '{}')".format(
+                                    action_part, pin
+                                ),
+                                integrity=True,
+                            )
+                        )
 
         return findings

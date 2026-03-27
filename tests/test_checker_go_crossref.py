@@ -18,19 +18,22 @@ def _make_index(tmpdir, files):
 class TestGoDepMissingFromGoSum:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "go.mod": (
-                "module example.com/myapp\n"
-                "\n"
-                "go 1.21\n"
-                "\n"
-                "require github.com/missing/dep v1.2.3\n"
-            ),
-            "go.sum": (
-                "github.com/other/thing v0.1.0 h1:abc=\n"
-                "github.com/other/thing v0.1.0/go.mod h1:def=\n"
-            ),
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "go.mod": (
+                    "module example.com/myapp\n"
+                    "\n"
+                    "go 1.21\n"
+                    "\n"
+                    "require github.com/missing/dep v1.2.3\n"
+                ),
+                "go.sum": (
+                    "github.com/other/thing v0.1.0 h1:abc=\n"
+                    "github.com/other/thing v0.1.0/go.mod h1:def=\n"
+                ),
+            },
+        )
         self.findings = GoChecker().check(index, self.tmpdir)
 
     def test_dep_in_gomod_missing_from_gosum(self):
@@ -56,19 +59,22 @@ class TestGoDepMissingFromGoSum:
 class TestGoDepPresentInGoSum:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "go.mod": (
-                "module example.com/myapp\n"
-                "\n"
-                "go 1.21\n"
-                "\n"
-                "require github.com/present/dep v1.0.0\n"
-            ),
-            "go.sum": (
-                "github.com/present/dep v1.0.0 h1:abc=\n"
-                "github.com/present/dep v1.0.0/go.mod h1:def=\n"
-            ),
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "go.mod": (
+                    "module example.com/myapp\n"
+                    "\n"
+                    "go 1.21\n"
+                    "\n"
+                    "require github.com/present/dep v1.0.0\n"
+                ),
+                "go.sum": (
+                    "github.com/present/dep v1.0.0 h1:abc=\n"
+                    "github.com/present/dep v1.0.0/go.mod h1:def=\n"
+                ),
+            },
+        )
         self.findings = GoChecker().check(index, self.tmpdir)
 
     def test_dep_in_gomod_present_in_gosum(self):
@@ -83,23 +89,26 @@ class TestGoDepPresentInGoSum:
 class TestGoModRequireBlockParsed:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        index = _make_index(self.tmpdir, {
-            "go.mod": (
-                "module example.com/myapp\n"
-                "\n"
-                "go 1.21\n"
-                "\n"
-                "require (\n"
-                "\tgithub.com/in/sum v1.0.0\n"
-                "\tgithub.com/not/insum v2.0.0\n"
-                "\tgithub.com/also/missing v3.0.0\n"
-                ")\n"
-            ),
-            "go.sum": (
-                "github.com/in/sum v1.0.0 h1:abc=\n"
-                "github.com/in/sum v1.0.0/go.mod h1:def=\n"
-            ),
-        })
+        index = _make_index(
+            self.tmpdir,
+            {
+                "go.mod": (
+                    "module example.com/myapp\n"
+                    "\n"
+                    "go 1.21\n"
+                    "\n"
+                    "require (\n"
+                    "\tgithub.com/in/sum v1.0.0\n"
+                    "\tgithub.com/not/insum v2.0.0\n"
+                    "\tgithub.com/also/missing v3.0.0\n"
+                    ")\n"
+                ),
+                "go.sum": (
+                    "github.com/in/sum v1.0.0 h1:abc=\n"
+                    "github.com/in/sum v1.0.0/go.mod h1:def=\n"
+                ),
+            },
+        )
         self.findings = GoChecker().check(index, self.tmpdir)
 
     def test_gomod_require_block_parsed(self):
