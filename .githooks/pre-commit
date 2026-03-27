@@ -1,11 +1,14 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# Pre-commit hook: run full build.
 
-# Activate venv if it exists
+set -e
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-if [ -f "$REPO_ROOT/.venv/bin/activate" ]; then
-    source "$REPO_ROOT/.venv/bin/activate"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "ERROR: uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+  exit 1
 fi
 
-echo "Running pre-commit checks (invoke build)..."
-invoke build
+cd "$REPO_ROOT"
+uv run inv build
