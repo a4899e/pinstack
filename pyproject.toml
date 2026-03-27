@@ -29,9 +29,6 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest==9.0.2", "pytest-randomly==4.0.1", "ruff==0.15.7", "pyright==1.1.408", "invoke==2.2.1", "jsonschema==4.26.0", "bandit==1.9.4"]
-
 [project.scripts]
 pinstack = "pinstack.cli:main"
 
@@ -52,3 +49,20 @@ exclude = ["tests", "build", "dist", ".venv", "**/__pycache__"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+# Build tools (bandit, pyright, etc.) require Python >=3.10; the package
+# itself still supports >=3.9 at runtime (dependencies = []).
+environments = ["python_version >= '3.10'"]
+
+[dependency-groups]
+build = [
+    "pytest==9.0.2",
+    "pytest-randomly==4.0.1",
+    "ruff==0.15.7",
+    "pyright==1.1.408",
+    "invoke==2.2.1",
+    "jsonschema==4.26.0",
+    "bandit==1.9.4",
+    "setuptools>=61.0",
+]
