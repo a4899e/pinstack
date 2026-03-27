@@ -442,7 +442,7 @@ wheels = [
 
 [[package]]
 name = "pinstack"
-version = "0.1.5"
+version = "0.2.0"
 source = { editable = "." }
 
 [package.dev-dependencies]
@@ -451,7 +451,6 @@ build = [
     { name = "detect-secrets", marker = "python_full_version >= '3.10'" },
     { name = "invoke", marker = "python_full_version >= '3.10'" },
     { name = "jsonschema", marker = "python_full_version >= '3.10'" },
-    { name = "pinstack", marker = "python_full_version >= '3.10'" },
     { name = "pip-audit", marker = "python_full_version >= '3.10'" },
     { name = "pyright", marker = "python_full_version >= '3.10'" },
     { name = "pytest", marker = "python_full_version >= '3.10'" },
@@ -468,7 +467,6 @@ build = [
     { name = "detect-secrets", specifier = "==1.5.0" },
     { name = "invoke", specifier = "==2.2.1" },
     { name = "jsonschema", specifier = "==4.26.0" },
-    { name = "pinstack", specifier = "==0.1.5" },
     { name = "pip-audit", specifier = "==2.10.0" },
     { name = "pyright", specifier = "==1.1.408" },
     { name = "pytest", specifier = "==9.0.2" },
