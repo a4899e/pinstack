@@ -131,22 +131,6 @@ silently defeats the pinning it was supposed to guarantee.
 
 Run `pinstack --list-checkers` to print this list from the installed version.
 
----|---|---|
-| `requirements` | `requirements*.txt` | `==` pinning and `--hash` verification |
-| `pyproject` | `pyproject.toml` | `==` exact pins in `[project.dependencies]` and `[project.optional-dependencies]` |
-| `package_json` | `package.json` | No `^`, `~`, or range specifiers in any dependency section |
-| `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
-| `yarn_lock` | `yarn.lock` | Integrity checksums present |
-| `pnpm_lock` | `pnpm-lock.yaml` | `integrity` hashes present |
-| `dockerfile` | `Dockerfile*` | `@sha256:` digest on every `FROM` |
-| `github_actions` | `.github/workflows/*.yml` | 40-char commit SHA after `@` in `uses:` |
-| `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present |
-| `cargo` | `Cargo.lock` | `checksum` field on each registry `[[package]]` |
-| `gemfile` | `Gemfile`, `Gemfile.lock` | Lock file exists alongside Gemfile |
-| `terraform` | `.terraform.lock.hcl` | `h1:` hashes present per provider |
-| `helm` | `Chart.yaml`, `Chart.lock` | Lock file exists when Chart.yaml has dependencies; `digest:` present |
-| `compose` | `docker-compose*.yml`, `compose*.yml` | `@sha256:` digest on `image:` references |
-
 ---
 
 ## CLI Reference
