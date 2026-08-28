@@ -56,8 +56,16 @@ def security(ctx: Context) -> None:
         "pip-audit --desc --require-hashes --disable-pip -r .runtime-deps.txt",
         pty=True,
     )
-    ctx.run("detect-secrets scan --baseline .secrets.baseline", pty=True)
-    ctx.run("detect-secrets audit --report .secrets.baseline", pty=True)
+    # Use detect-secrets-hook, not `detect-secrets scan --baseline`. `scan`
+    # UPDATES the baseline in place: it exits 0 on a newly committed secret and
+    # silently writes it into .secrets.baseline as an accepted entry, so the
+    # only symptom was a dirty baseline that everyone discards. The hook entry
+    # point checks against the baseline instead -- it exits non-zero on a new
+    # secret and never writes to the file.
+    ctx.run(
+        "git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline",
+        pty=True,
+    )
 
 
 @task

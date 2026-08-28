@@ -491,9 +491,10 @@ class TestSelfScan:
         assert rc == 1
 
     def test_self_scan_clean_with_fixtures_excluded(self):
-        """With fixtures excluded, pinstack's pyproject.toml has no companion lock file."""
+        """With fixtures excluded, pinstack scans itself clean."""
         rc, out, err = run_pinstack(PROJECT_ROOT, "--exclude-dir", "fixtures")
-        # pinstack's own deps are pinned and requirements.txt has hashes
+        # pinstack's own build-group deps are == pinned, and uv.lock is the
+        # companion lock file the pyproject checker requires.
         assert rc == 0
         assert "0 findings" in out
 

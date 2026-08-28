@@ -9,6 +9,30 @@ command and zero setup beyond `pip install pinstack`.
 
 ---
 
+## Why This Matters
+
+A version range is a promise someone else can rewrite. `requests>=2.28`,
+`FROM python:3.11-slim`, and `uses: actions/checkout@v4` all resolve to
+whatever bytes the registry serves at the moment of the build, and that answer
+can change without the version string changing at all. A hijacked maintainer
+account, a re-pushed tag, a typosquat that wins a resolution race, or a
+compromised mirror each produce a build that is green, correct according to the
+manifest, and running code nobody reviewed.
+
+Pinning to an exact version narrows that window. Pinning to a *hash* closes it:
+a digest names the content itself, so substituted bytes fail the build loudly
+instead of shipping silently. That is the difference between a build that is
+reproducible and one that merely looks reproducible.
+
+The catch is that every ecosystem spells this differently -- `==` plus `--hash`
+in pip, `integrity` in npm, `@sha256:` in Docker, a 40-character commit SHA in
+GitHub Actions, `h1:` in Go and Terraform. A real repository uses several at
+once, and one unpinned entry reopens the window. pinstack checks all of them in
+a single pass, so "is this repository actually pinned?" becomes a question with
+a yes-or-no answer you can put in CI.
+
+---
+
 ## Project Goals
 
 **1. Broad ecosystem coverage**
@@ -40,10 +64,19 @@ pip install pinstack
 ```
 
 Because pinstack has zero runtime dependencies, it can also be run directly
-from a checkout without installation:
+from a checkout without installation. Run it from the checkout root:
 
 ```
-python -m pinstack .
+git clone https://github.com/a4899e/pinstack.git
+cd pinstack
+python3 -m pinstack .
+```
+
+To scan a project elsewhere without installing, put the checkout root on
+`PYTHONPATH`:
+
+```
+PYTHONPATH=/path/to/pinstack python3 -m pinstack /path/to/project
 ```
 
 ---
@@ -72,22 +105,31 @@ pinstack . --format sarif > results.sarif
 
 ## Supported Ecosystems
 
+Sixteen checkers, run in a single pass. Where a manifest and a lock file both
+exist, pinstack also cross-references them: a dependency declared in the
+manifest but absent from the lock file means the lock file is stale, which
+silently defeats the pinning it was supposed to guarantee.
+
 | Checker | Files Examined | What Is Checked |
 |---|---|---|
-| `requirements` | `requirements*.txt` | `==` pinning and `--hash` verification |
-| `pyproject` | `pyproject.toml` | `==` exact pins in `[project.dependencies]` and `[project.optional-dependencies]` |
-| `package_json` | `package.json` | No `^`, `~`, or range specifiers in any dependency section |
+| `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
+| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale |
+| `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | No `^`, `~`, or range specifiers in any dependency section; declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
 | `pnpm_lock` | `pnpm-lock.yaml` | `integrity` hashes present |
 | `dockerfile` | `Dockerfile*` | `@sha256:` digest on every `FROM` |
-| `github_actions` | `.github/workflows/*.yml` | 40-char commit SHA after `@` in `uses:` |
-| `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present |
-| `cargo` | `Cargo.lock` | `checksum` field on each registry `[[package]]` |
-| `gemfile` | `Gemfile`, `Gemfile.lock` | Lock file exists alongside Gemfile |
+| `compose` | `docker-compose*.yml`, `docker-compose*.yaml`, `compose*.yml`, `compose*.yaml` | `@sha256:` digest on `image:` references |
+| `github_actions` | `*.yml` and `*.yaml` under `.github/workflows/` | 40-char commit SHA after `@` in `uses:` |
+| `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present; every `require` appears in `go.sum` |
+| `cargo` | `Cargo.lock`, `Cargo.toml` | `checksum` field on each registry `[[package]]`; every `Cargo.toml` dependency appears in `Cargo.lock` |
+| `gemfile` | `Gemfile`, `Gemfile.lock` | Lock file exists alongside `Gemfile`; every declared gem appears in it |
 | `terraform` | `.terraform.lock.hcl` | `h1:` hashes present per provider |
-| `helm` | `Chart.yaml`, `Chart.lock` | Lock file exists when Chart.yaml has dependencies; `digest:` present |
-| `compose` | `docker-compose*.yml`, `compose*.yml` | `@sha256:` digest on `image:` references |
+| `helm` | `Chart.yaml`, `Chart.lock` | Lock file exists when `Chart.yaml` has dependencies; `digest:` present |
+| `maven` | `pom.xml` | Exact `<version>` required -- no ranges, `LATEST`/`RELEASE`, `SNAPSHOT`, unresolvable `${property}` references, or missing versions |
+| `gradle` | `build.gradle`, `build.gradle.kts`, `gradle.lockfile` | Exact versions -- no dynamic (`+`) or range versions; `gradle.lockfile` must exist and must not be stale |
+
+Run `pinstack --list-checkers` to print this list from the installed version.
 
 ---
 
@@ -127,12 +169,15 @@ pinstack [PATH] [OPTIONS]
 Human-readable output suitable for local development and CI logs:
 
 ```
-FAIL  Dockerfile:3  FROM without @sha256: digest: python:3.11-slim
-FAIL  requirements.txt:7  not pinned with ==: requests>=2.28
-FAIL  go.mod  go.sum missing alongside go.mod
+FAIL  Dockerfile:1  FROM 'python:3.11-slim' is not pinned with @sha256: digest
+FAIL  go.mod  go.mod has no corresponding go.sum; run 'go mod tidy'
+FAIL  requirements.txt:1  'requests' is not pinned with ==; use package==version
 
 3 errors in 3 files
 ```
+
+Findings without a meaningful line number (a missing lock file, for instance)
+are reported against the file alone.
 
 ### sarif
 
@@ -219,6 +264,7 @@ Add a task to your `tasks.py`:
 ```python
 from invoke import task
 
+
 @task
 def supply_chain(c):
     """Check dependency pinning."""
@@ -250,8 +296,11 @@ pinstack .
 
 ```
 git clone https://github.com/a4899e/pinstack.git /tmp/pinstack
-python3 /tmp/pinstack/pinstack .
+PYTHONPATH=/tmp/pinstack python3 -m pinstack .
 ```
+
+`PYTHONPATH` must point at the checkout root, not at the inner `pinstack/`
+package directory.
 
 **Check only specific ecosystems:**
 
