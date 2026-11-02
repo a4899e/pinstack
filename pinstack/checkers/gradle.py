@@ -84,11 +84,45 @@ def _match_map_notation(line: str) -> Optional[tuple[str, str, Optional[str]]]:
     return fields["group"], fields["name"], fields.get("version")
 
 
-def _strip_comments(text: str) -> str:
+def _string_end(text: str, i: int, raw_triple: bool) -> int:
+    """Return the index just past the string literal that starts at ``text[i]``.
+
+    Groovy and Kotlin strings may be single-, double- or triple-quoted. A
+    backslash escapes the next character, except in a Kotlin triple-quoted
+    (raw) string, which has no escapes: a backslash right before the closing
+    three quotes is content. A single-line string that is not closed ends at
+    the newline.
+
+    :param raw_triple: True for Kotlin, whose triple-quoted strings are raw.
+    """
+    ch, n = text[i], len(text)
+    if text.startswith(ch * 3, i):
+        quote = ch * 3
+        j = i + 3
+        while j < n:
+            if text.startswith(quote, j):
+                # Extra quotes before the closing three are content.
+                j += 3
+                while j < n and text[j] == ch:
+                    j += 1
+                return j
+            j += 2 if text[j] == "\\" and not raw_triple else 1
+        return n
+    j = i + 1
+    while j < n and text[j] != "\n":
+        if text[j] == "\\":
+            j += 2
+            continue
+        if text[j] == ch:
+            return j + 1
+        j += 1
+    return min(j, n)
+
+
+def _strip_comments(text: str, raw_triple: bool = False) -> str:
     """Blank ``//`` and ``/* */`` comments outside string literals.
 
-    Newlines are kept so line numbers still hold. Groovy and Kotlin strings
-    may be single-, double- or triple-quoted.
+    Newlines are kept so line numbers still hold.
     """
     out: list[str] = []
     i, n = 0, len(text)
@@ -105,13 +139,7 @@ def _strip_comments(text: str) -> str:
             out.append("".join(c if c == "\n" else " " for c in text[i:end]))
             i = end
         elif text[i] in ("'", '"'):
-            quote = text[i] * 3 if text.startswith(text[i] * 3, i) else text[i]
-            j = i + len(quote)
-            while j < n and not text.startswith(quote, j):
-                if text[j] == "\n" and len(quote) == 1:
-                    break  # unterminated single-line string
-                j += 2 if text[j] == "\\" else 1
-            end = min(j + len(quote), n)
+            end = _string_end(text, i, raw_triple)
             out.append(text[i:end])
             i = end
         else:
@@ -120,29 +148,23 @@ def _strip_comments(text: str) -> str:
     return "".join(out)
 
 
-def _code_chars(text: str) -> Iterator[tuple[int, str]]:
+def _code_chars(text: str, raw_triple: bool = False) -> Iterator[tuple[int, str]]:
     """Yield ``(index, char)`` for each character outside string literals.
 
-    A backslash inside a string escapes the next character, so
-    ``"quote: \\"("`` holds no code.
+    Strings are delimited as in :func:`_string_end`, so ``"quote: \\"("``
+    holds no code.
     """
-    quote = ""
-    escaped = False
-    for i, ch in enumerate(text):
-        if quote:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == quote:
-                quote = ""
-        elif ch in ("'", '"'):
-            quote = ch
-        else:
-            yield i, ch
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ("'", '"'):
+            i = _string_end(text, i, raw_triple)
+            continue
+        yield i, ch
+        i += 1
 
 
-def _split_statements(line: str) -> list[str]:
+def _split_statements(line: str, raw_triple: bool = False) -> list[str]:
     """Split a line at ``{``, ``}`` and ``;`` outside string literals.
 
     Declarations can share a line with block braces or with each other
@@ -151,7 +173,7 @@ def _split_statements(line: str) -> list[str]:
     """
     statements: list[str] = []
     start = 0
-    for i, ch in _code_chars(line):
+    for i, ch in _code_chars(line, raw_triple):
         if ch in "{};":
             statements.append(line[start:i])
             start = i + 1
@@ -165,10 +187,10 @@ _EXTRA_COORD_RE = re.compile(
 )
 
 
-def _paren_depth(text: str) -> int:
+def _paren_depth(text: str, raw_triple: bool = False) -> int:
     """Return the net number of ``(`` opened outside string literals."""
     depth = 0
-    for _, ch in _code_chars(text):
+    for _, ch in _code_chars(text, raw_triple):
         if ch == "(":
             depth += 1
         elif ch == ")":
@@ -177,7 +199,7 @@ def _paren_depth(text: str) -> int:
 
 
 def _join_open_calls(
-    code_lines: list[str],
+    code_lines: list[str], raw_triple: bool = False
 ) -> tuple[list[tuple[int, str]], list[int]]:
     """Join a dependency call that spans lines into one line.
 
@@ -199,12 +221,12 @@ def _join_open_calls(
     while i < len(code_lines):
         start, parts = i + 1, [code_lines[i]]
         i += 1
-        last = _split_statements(parts[0])[-1]
+        last = _split_statements(parts[0], raw_triple)[-1]
         if _CONFIG_START_RE.match(last):
-            depth = _paren_depth(last)
+            depth = _paren_depth(last, raw_triple)
             while depth > 0 and i < len(code_lines):
                 parts.append(code_lines[i].strip())
-                depth += _paren_depth(code_lines[i])
+                depth += _paren_depth(code_lines[i], raw_triple)
                 i += 1
             if depth > 0:
                 unclosed.append(start)
@@ -213,21 +235,24 @@ def _join_open_calls(
 
 
 def _declarations(
-    lines: list[str],
+    lines: list[str], raw_triple: bool = False
 ) -> tuple[list[tuple[int, str, str, str, Optional[str]]], list[int]]:
     """Return (line, config, group, artifact, version or None) per declaration.
 
     Comments are removed first, so a commented-out declaration is ignored
     even when it follows a brace or semicolon.
 
+    :param raw_triple: True for a Kotlin script (``.gradle.kts``), whose
+        triple-quoted strings have no escapes.
+
     :returns: The declarations, and the line numbers of dependency calls
         that are never closed.
     """
     found: list[tuple[int, str, str, str, Optional[str]]] = []
-    code_lines = _strip_comments("".join(lines)).split("\n")
-    joined, unclosed = _join_open_calls(code_lines)
+    code_lines = _strip_comments("".join(lines), raw_triple).split("\n")
+    joined, unclosed = _join_open_calls(code_lines, raw_triple)
     for lineno, code in joined:
-        for statement in _split_statements(code):
+        for statement in _split_statements(code, raw_triple):
             m = _DEP_RE.match(statement)
             if m:
                 config = m.group("config")
@@ -570,7 +595,9 @@ class GradleChecker(Checker):
                         encoding="utf-8",
                         errors="replace",
                     ) as fh:
-                        decls, unclosed = _declarations(fh.readlines())
+                        decls, unclosed = _declarations(
+                            fh.readlines(), raw_triple=fname.endswith(".kts")
+                        )
                 except OSError:
                     continue
                 declarations.append((fname, decls))

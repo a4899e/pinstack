@@ -708,3 +708,38 @@ class TestGradleCodexFollowUps:
                 " it could not be checked",
             )
         ]
+
+    def test_kotlin_raw_string_ending_in_backslash(self):
+        """Codex #15 follow-up: Kotlin `\"\"\"\\\"\"\"` is raw; the backslash escapes nothing."""
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "build.gradle.kts"), "w") as fh:
+                fh.write(
+                    "plugins { java }\n"
+                    'dependencies { val marker = """\\"""; implementation("g:a:+") }\n'
+                )
+            with open(os.path.join(d, "gradle.lockfile"), "w") as fh:
+                fh.write("g:a:1.0=compileClasspath\n")
+            index = {d: {"build.gradle.kts", "gradle.lockfile"}}
+            findings = GradleChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [(f.line, f.message) for f in findings] == [
+            (2, "'g:a' uses dynamic version '+' (+ wildcard); pin to an exact version")
+        ]
+
+    def test_groovy_triple_quoted_string_keeps_escapes(self):
+        """Groovy triple-quoted strings do have escapes: `\\"` is content."""
+        assert _decls(
+            'dependencies {\n  def s = """a\\""""; implementation \'g:a:+\'\n}\n'
+        ) == [("g", "a", "+")]
+
+    def test_extra_quotes_before_raw_string_close(self):
+        from pinstack.checkers.gradle import _declarations
+
+        text = 'dependencies { val q = """a""""; implementation("g:a:+") }\n'
+        decls, _ = _declarations(text.splitlines(True), raw_triple=True)
+        assert [d[2:] for d in decls] == [("g", "a", "+")]
