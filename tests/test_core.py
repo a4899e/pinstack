@@ -13,6 +13,8 @@ from pinstack.core import (
     Finding,
     _matches_any_pattern,
     build_index,
+    index_findings,
+    scan_index,
     format_text,
     run_checkers,
     validate_url_fragment_hashes,
@@ -325,12 +327,11 @@ class TestBuildIndex:
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_respects_max_index_size(self, capsys):
-        # Create 10 matching files, cap at 5
-        files = {"file{}.txt".format(i): "content\n" for i in range(10)}
+        # 10 directories with one matching file each, cap at 5
+        files = {"d{}".format(i): {"file.txt": "content\n"} for i in range(10)}
         root = _make_tmpdir_tree(files)
         try:
-            patterns = {"file{}.txt".format(i) for i in range(10)}
-            index = build_index(root, patterns, max_index_size=5)
+            index = build_index(root, {"file.txt"}, max_index_size=5)
             total = sum(len(fnames) for fnames in index.values())
             assert total == 5
             captured = capsys.readouterr()
@@ -638,3 +639,169 @@ class TestValidateUrlFragmentHashes:
         errors = validate_url_fragment_hashes(url)
         assert len(errors) == 1
         assert "sha256" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# scan_index / index_findings: incomplete scans fail closed
+# ---------------------------------------------------------------------------
+
+
+class TestScanIndex:
+    def test_complete_scan(self):
+        root = _make_tmpdir_tree({"requirements.txt": "x\n"})
+        try:
+            result = scan_index(root, {"requirements.txt"})
+            assert result.complete
+            assert index_findings(result, 4, 384) == []
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_file_below_max_depth_reported(self):
+        root = _make_tmpdir_tree(
+            {"a": {"b": {"requirements.txt": "x\n", "c": {"requirements.txt": "y\n"}}}}
+        )
+        try:
+            result = scan_index(root, {"requirements.txt"}, max_depth=2)
+            assert result.index == {}
+            assert result.first_skipped_by_depth == os.path.join(
+                "a", "b", "requirements.txt"
+            )
+            (finding,) = index_findings(result, 2, 384)
+            assert finding.checker == "pinstack"
+            assert finding.path == os.path.join("a", "b", "requirements.txt")
+            assert "below --max-depth 2 and was not scanned" in finding.message
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_deep_walk_continues_until_first_match(self):
+        """Non-matching deep directories don't end the search for a skipped file."""
+        root = _make_tmpdir_tree(
+            {"a": {"b": {"README": "x\n", "c": {"d": {"requirements.txt": "y\n"}}}}}
+        )
+        try:
+            result = scan_index(root, {"requirements.txt"}, max_depth=2)
+            assert result.first_skipped_by_depth == os.path.join(
+                "a", "b", "c", "d", "requirements.txt"
+            )
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_index_limit_reported(self):
+        files = {"d{}".format(i): {"file.txt": "x\n"} for i in range(10)}
+        root = _make_tmpdir_tree(files)
+        try:
+            result = scan_index(root, {"file.txt"}, max_index_size=5)
+            assert sum(len(v) for v in result.index.values()) == 5
+            assert result.first_skipped_by_limit == os.path.join("d5", "file.txt")
+            (finding,) = index_findings(result, 4, 5)
+            assert finding.path == os.path.join("d5", "file.txt")
+            assert "index limit of 5 files reached" in finding.message
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_directory_indexed_whole_or_not_at_all(self):
+        """A manifest is never indexed without the lock file beside it."""
+        root = _make_tmpdir_tree(
+            {
+                "a": {"package.json": "{}"},
+                "b": {"package.json": "{}", "yarn.lock": ""},
+            }
+        )
+        try:
+            result = scan_index(root, {"package.json", "yarn.lock"}, max_index_size=2)
+            assert list(result.index) == [os.path.join(root, "a")]
+            assert result.first_skipped_by_limit == os.path.join("b", "package.json")
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_excluded_dirs_not_counted(self):
+        root = _make_tmpdir_tree(
+            {"node_modules": {"a": {"b": {"c": {"requirements.txt": "x\n"}}}}}
+        )
+        try:
+            result = scan_index(root, {"requirements.txt"}, max_depth=1)
+            assert result.complete
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_installed_package_dirs_excluded(self):
+        """Third-party manifests in tool caches and site-packages are not the project's."""
+        root = _make_tmpdir_tree(
+            {
+                ".tox": {"py": {"lib": {"x": {"package.json": "{}"}}}},
+                "lib": {
+                    "site-packages": {"pkg": {"package.json": "{}"}},
+                    "dist-packages": {"pkg": {"package.json": "{}"}},
+                },
+            }
+        )
+        try:
+            result = scan_index(root, {"package.json"}, max_depth=2)
+            assert result.complete
+            assert result.index == {}
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_non_matching_files_not_counted(self):
+        root = _make_tmpdir_tree({"a": {"b": {"c": {"README.md": "x\n"}}}})
+        try:
+            assert scan_index(root, {"requirements.txt"}, max_depth=1).complete
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class TestPathQualifiedPatterns:
+    def test_pattern_with_slash_matches_relative_path(self):
+        pats = {".github/workflows/*.yml"}
+        assert _matches_any_pattern(
+            "ci.yml", pats, os.path.join(".github", "workflows")
+        )
+        assert not _matches_any_pattern("ci.yml", pats, "charts")
+        assert not _matches_any_pattern("ci.yml", pats, ".")
+
+    def test_root_relative_dir(self):
+        assert _matches_any_pattern("a.yml", {"a.yml"}, ".")
+        assert _matches_any_pattern("x.yml", {"*/x.yml"}, "sub")
+        assert not _matches_any_pattern("x.yml", {"*/x.yml"}, ".")
+
+    def test_github_actions_indexes_only_workflows(self):
+        from pinstack.checkers.github_actions import GitHubActionsChecker
+
+        root = _make_tmpdir_tree(
+            {
+                ".github": {"workflows": {"ci.yml": "on: push\n"}},
+                "charts": {"values.yaml": "a: 1\n"},
+                "sub": {".github": {"workflows": {"x.yaml": "on: push\n"}}},
+            }
+        )
+        try:
+            result = scan_index(root, set(GitHubActionsChecker.patterns))
+            rel = sorted(
+                os.path.relpath(os.path.join(d, f), root)
+                for d, names in result.index.items()
+                for f in names
+            )
+            assert rel == [
+                os.path.join(".github", "workflows", "ci.yml"),
+                os.path.join("sub", ".github", "workflows", "x.yaml"),
+            ]
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)

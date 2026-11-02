@@ -1,0 +1,7 @@
+[project]
+name = "x"
+version = "1"
+dependencies = ["requests==2.*"]
+
+[tool.poetry.dependencies]
+flask = "2.*"

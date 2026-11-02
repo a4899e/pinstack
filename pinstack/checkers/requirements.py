@@ -6,7 +6,13 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    validate_url_fragment_hashes,
+    is_commit_sha,
+)
 
 # Matches a package specifier line.
 # Group 1: package name (including optional [extras])
@@ -66,7 +72,7 @@ def _check_line(raw_line: str) -> tuple:
             at_pos = url_part.rfind("@")
             if at_pos >= 0:
                 ref = url_part[at_pos + 1 :]
-                if re.match(r"^[0-9a-f]{40}$", ref):
+                if is_commit_sha(ref):
                     # Immutable commit SHA — VCS deps are built from source,
                     # so pip cannot produce --hash for them.  The SHA pin is
                     # sufficient for integrity verification.
@@ -111,8 +117,8 @@ def _check_line(raw_line: str) -> tuple:
     version = m.group(3) or ""
 
     # Determine pin status
-    if operator == "==" and version:
-        # Correctly pinned. Now check for --hash=
+    if operator == "==" and version and "*" not in version:
+        # Correctly pinned (==2.* is a prefix match, not a pin). Now check for --hash=
         has_hash = "--hash=" in full_for_hash
         if has_hash:
             return False, False, False, pkg_name  # clean
