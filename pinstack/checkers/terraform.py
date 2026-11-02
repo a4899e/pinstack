@@ -155,14 +155,11 @@ def _provider_key(source: str) -> str:
     return "/".join(parts)
 
 
-def _required_providers(content: str) -> set[str]:
-    """Return the provider keys a .tf file requires.
+def _declared_providers(content: str) -> dict[str, str]:
+    """Return local name -> provider key for a .tf file's ``required_providers``.
 
-    Entries in ``required_providers`` use their ``source`` (or, in the
-    legacy ``name = "constraint"`` form, ``hashicorp/<name>``). A
-    ``provider "<name>"`` block whose name is not declared there implies
-    ``hashicorp/<name>``. Built-in providers (``terraform.io/builtin/...``)
-    are never locked and are left out.
+    Entries use their ``source`` (or, in the legacy ``name = "constraint"``
+    form, ``hashicorp/<name>``).
     """
     declared: dict[str, str] = {}
     for m in _REQUIRED_PROVIDERS_RE.finditer(content):
@@ -184,19 +181,44 @@ def _required_providers(content: str) -> set[str]:
                 if src:
                     source = src.group(1)
             declared[name] = _provider_key(source)
+    return declared
+
+
+def _configured_providers(content: str) -> set[str]:
+    """Return the local names of a .tf file's ``provider "<name>"`` blocks."""
+    return {m.group(1) for m in _PROVIDER_BLOCK_RE.finditer(content)}
+
+
+def _required_providers(declared: dict[str, str], configured: set[str]) -> set[str]:
+    """Return the provider keys a module requires.
+
+    Terraform reads every .tf file in a directory as one module, so
+    ``declared`` (from :func:`_declared_providers`) and ``configured``
+    (the names of ``provider "<name>"`` blocks) are collected across the
+    whole directory first. A configured name that is not declared implies
+    ``hashicorp/<name>``. Built-in providers (``terraform.io/builtin/...``)
+    are never locked and are left out.
+    """
     keys = set(declared.values())
-    for m in _PROVIDER_BLOCK_RE.finditer(content):
-        if m.group(1) not in declared:
-            keys.add(_provider_key(m.group(1)))
+    keys.update(_provider_key(name) for name in configured if name not in declared)
     return {k for k in keys if not k.startswith("terraform.io/builtin/")}
 
 
-def _locked_providers(lock_path: str) -> set[str]:
+def _read_lock(lock_path: str) -> Optional[str]:
+    """Return a lock file's text with comments blanked, or None.
+
+    Terraform ignores commented-out provider blocks and hashes, so they
+    must not count as locked.
+    """
     try:
         with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
+            return _strip_comments(fh.read())
     except OSError:
-        return set()
+        return None
+
+
+def _locked_providers(lock_path: str) -> set[str]:
+    content = _read_lock(lock_path) or ""
     return {_provider_key(m.group(1)) for m in _LOCK_PROVIDER_RE.finditer(content)}
 
 
@@ -212,7 +234,8 @@ class TerraformChecker(Checker):
         # 1. Find each directory's first root-module signal and every local
         #    module it calls.
         signals: dict[str, tuple[str, int]] = {}  # dir -> (file, line)
-        required: dict[str, set[str]] = {}  # dir -> provider keys
+        declared: dict[str, dict[str, str]] = {}  # dir -> local name -> key
+        configured: dict[str, set[str]] = {}  # dir -> provider block names
         called: set[str] = set()
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
@@ -223,8 +246,9 @@ class TerraformChecker(Checker):
                 if m and dir_path not in signals:
                     lineno = content.count("\n", 0, m.start()) + 1
                     signals[dir_path] = (fname, lineno)
-                required.setdefault(dir_path, set()).update(
-                    _required_providers(content)
+                declared.setdefault(dir_path, {}).update(_declared_providers(content))
+                configured.setdefault(dir_path, set()).update(
+                    _configured_providers(content)
                 )
                 for source in _local_module_sources(content):
                     called.add(os.path.normpath(os.path.join(dir_path, source)))
@@ -237,9 +261,10 @@ class TerraformChecker(Checker):
                 continue
             if _LOCK_FILE in index[dir_path]:
                 lock_path = os.path.join(dir_path, _LOCK_FILE)
-                unlocked = sorted(
-                    required.get(dir_path, set()) - _locked_providers(lock_path)
+                required = _required_providers(
+                    declared.get(dir_path, {}), configured.get(dir_path, set())
                 )
+                unlocked = sorted(required - _locked_providers(lock_path))
                 if unlocked:
                     findings.append(
                         Finding(
@@ -285,11 +310,10 @@ class TerraformChecker(Checker):
                 full_path = os.path.join(dir_path, fname)
                 rel_path = os.path.relpath(full_path, root)
 
-                try:
-                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                        lines = fh.readlines()
-                except OSError:
+                content = _read_lock(full_path)
+                if content is None:
                     continue
+                lines = content.splitlines()
 
                 in_provider = False
                 provider_name: Optional[str] = None

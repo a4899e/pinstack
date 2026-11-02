@@ -112,6 +112,9 @@ def _parse_manifest(path: str) -> _Manifest:
 
     section: list[str] = []
     table_dep: Optional[_Dependency] = None
+    # Dotted keys (`serde1.package = ...`, `serde1.version = ...`) spread one
+    # dependency over several lines of a section; collect them in one entry.
+    dotted: dict[str, _Dependency] = {}
     pending_key: Optional[str] = None
     pending_value = ""
     for raw in content.splitlines():
@@ -132,6 +135,7 @@ def _parse_manifest(path: str) -> _Manifest:
         # 1. Table headers.
         if line.startswith("["):
             table_dep = None
+            dotted = {}
             section = _split_dotted(line.strip("[] "))
             if section == ["workspace"]:
                 manifest.has_workspace = True
@@ -169,13 +173,20 @@ def _parse_manifest(path: str) -> _Manifest:
             continue
 
         # 3. A dependency: name = "1", name = { ... }, or name.field = ...
-        dep = _Dependency(key=key_parts[0])
         if len(key_parts) > 1:
+            if key_parts[0] in dotted:
+                _apply_dependency_field(dotted[key_parts[0]], key_parts[1], value)
+                continue
+            dep = _Dependency(key=key_parts[0])
+            dotted[dep.key] = dep
             _apply_dependency_field(dep, key_parts[1], value)
         elif value.startswith("{"):
+            dep = _Dependency(key=key_parts[0])
             dep.package = _inline_field(value, "package")
             dep.inherits = _inline_field(value, "workspace") == "true"
             dep.path = _inline_field(value, "path")
+        else:
+            dep = _Dependency(key=key_parts[0])
         if section == ["workspace", "dependencies"]:
             manifest.workspace_dependencies[dep.key] = dep
         else:
@@ -233,8 +244,9 @@ def _workspace_member_dirs(ws_dir: str, workspace: _Manifest) -> set[str]:
     """Return the member directories of the workspace rooted at ``ws_dir``.
 
     Follows Cargo: directories matched by a ``members`` glob, plus every
-    path dependency (of the root package or of any member, transitively)
-    that lies inside the workspace directory, less anything under an
+    path dependency (of the root package or of any member, transitively,
+    including paths inherited from ``[workspace.dependencies]``) that lies
+    inside the workspace directory, less anything under an
     ``exclude`` entry.
     Source: https://doc.rust-lang.org/cargo/reference/workspaces.html
     """
@@ -247,10 +259,23 @@ def _workspace_member_dirs(ws_dir: str, workspace: _Manifest) -> set[str]:
             and os.path.isfile(os.path.join(directory, "Cargo.toml"))
         )
 
+    def path_dependencies(directory: str, manifest: _Manifest) -> list[str]:
+        # An inherited dependency (`helper.workspace = true`) takes its path
+        # from [workspace.dependencies], relative to the workspace root.
+        paths: list[str] = []
+        for dep in manifest.dependencies:
+            if dep.path:
+                paths.append(os.path.join(directory, dep.path))
+            elif dep.inherits:
+                inherited = workspace.workspace_dependencies.get(dep.key)
+                if inherited is not None and inherited.path:
+                    paths.append(os.path.join(ws_dir, inherited.path))
+        return paths
+
     queue: list[str] = []
     for pattern in workspace.members:
         queue.extend(glob.glob(os.path.join(ws_dir, pattern)))
-    queue.extend(os.path.join(ws_dir, d.path) for d in workspace.dependencies if d.path)
+    queue.extend(path_dependencies(ws_dir, workspace))
 
     members: set[str] = set()
     while queue:
@@ -259,9 +284,7 @@ def _workspace_member_dirs(ws_dir: str, workspace: _Manifest) -> set[str]:
             continue
         members.add(directory)
         manifest = _parse_manifest(os.path.join(directory, "Cargo.toml"))
-        queue.extend(
-            os.path.join(directory, d.path) for d in manifest.dependencies if d.path
-        )
+        queue.extend(path_dependencies(directory, manifest))
     return members
 
 

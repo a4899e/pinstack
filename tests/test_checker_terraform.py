@@ -182,6 +182,19 @@ _AWS_LOCK = (
 )
 
 
+def _module_required(tf):
+    # type: (str) -> set
+    from pinstack.checkers.terraform import (
+        _configured_providers,
+        _declared_providers,
+        _required_providers,
+        _strip_comments,
+    )
+
+    text = _strip_comments(tf)
+    return _required_providers(_declared_providers(text), _configured_providers(text))
+
+
 class TestTerraformLockCoverage:
     """Codex review of #13: a lock file must actually lock the required providers."""
 
@@ -211,9 +224,7 @@ class TestTerraformLockCoverage:
         assert _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": lock}) == []
 
     def test_local_name_and_legacy_constraint_forms(self):
-        from pinstack.checkers.terraform import _required_providers, _strip_comments
-
-        tf = _strip_comments(
+        tf = (
             "terraform {\n  required_providers {\n"
             '    mycloud = {\n      source = "acme/cloud"\n    }\n'
             '    null = "~> 3.0"\n'
@@ -222,18 +233,47 @@ class TestTerraformLockCoverage:
             'provider "google" {}\n'
             'data "terraform_remote_state" "x" {}\n'
         )
-        assert _required_providers(tf) == {
+        assert _module_required(tf) == {
             "acme/cloud",
             "hashicorp/null",
             "hashicorp/google",
         }
 
     def test_builtin_provider_not_required(self):
-        from pinstack.checkers.terraform import _required_providers
-
         tf = (
             "terraform {\n  required_providers {\n"
             '    terraform = { source = "terraform.io/builtin/terraform" }\n'
             "  }\n}\n"
         )
-        assert _required_providers(tf) == set()
+        assert _module_required(tf) == set()
+
+    def test_local_names_resolved_across_files(self):
+        """Codex #13 follow-up: required_providers in versions.tf names provider.tf's block."""
+        findings = _scan_tree(
+            {
+                "versions.tf": "terraform {\n  required_providers {\n"
+                '    cloudflare = { source = "cloudflare/cloudflare", version = "4.0.0" }\n'
+                "  }\n}\n",
+                "provider.tf": 'provider "cloudflare" {}\n',
+                ".terraform.lock.hcl": 'provider "registry.terraform.io/cloudflare/cloudflare" {\n'
+                '  version = "4.0.0"\n'
+                '  hashes = [\n    "h1:abc=",\n  ]\n}\n',
+            }
+        )
+        assert findings == []
+
+    def test_commented_lock_does_not_cover(self):
+        """Codex #13 follow-up: a block-commented provider is not locked."""
+        lock = "/*\n" + _AWS_LOCK + "*/\n"
+        findings = _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": lock})
+        assert [m for _, m in findings] == [
+            ".terraform.lock.hcl does not lock 1 required provider"
+            " (hashicorp/aws); run 'terraform init' and commit the lock file"
+        ]
+
+    def test_commented_hash_is_not_a_hash(self):
+        lock = _AWS_LOCK.replace('    "h1:abc=",', '    # "h1:abc=",')
+        findings = _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": lock})
+        assert [m for _, m in findings] == [
+            "provider 'aws' is missing h1: hash in lock file"
+        ]

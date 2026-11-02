@@ -317,3 +317,42 @@ class TestCargoManifestSyntax:
             }
         )
         assert findings == []
+
+    def test_dotted_rename_is_one_dependency(self):
+        """Codex #13 follow-up: dotted fields describe one renamed dependency."""
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["m"]\n',
+                "Cargo.lock": _LOCK_SERDE,
+                "m/Cargo.toml": '[package]\nname = "m"\n[dependencies]\n'
+                'serde1.package = "serde"\nserde1.version = "1"\n',
+            }
+        )
+        assert findings == []
+
+    def test_dotted_workspace_rename_keeps_package(self):
+        """A later dotted field must not drop an earlier `package` in [workspace.dependencies]."""
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["m"]\n'
+                '[workspace.dependencies]\nserde1.package = "serde"\nserde1.version = "1"\n',
+                "Cargo.lock": _LOCK_SERDE,
+                "m/Cargo.toml": '[package]\nname = "m"\n[dependencies]\nserde1.workspace = true\n',
+            }
+        )
+        assert findings == []
+
+    def test_inherited_path_dependency_is_a_member(self):
+        """Codex #13 follow-up: a `workspace = true` path dep resolves against the root."""
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["crates/app"]\n'
+                '[workspace.dependencies]\nhelper = { path = "shared/helper" }\n',
+                "Cargo.lock": _LOCK_SERDE
+                + '\n[[package]]\nname = "app"\n\n[[package]]\nname = "helper"\n',
+                "crates/app/Cargo.toml": '[package]\nname = "app"\n[dependencies]\n'
+                "helper.workspace = true\n",
+                "shared/helper/Cargo.toml": '[package]\nname = "helper"\n[dependencies]\nserde = "1"\n',
+            }
+        )
+        assert findings == []
