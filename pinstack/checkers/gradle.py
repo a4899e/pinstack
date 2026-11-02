@@ -6,7 +6,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-from typing import Optional
+from typing import Iterator, Optional
 
 from pinstack.core import Checker, Finding, FileIndex, _matches_any_pattern
 
@@ -120,6 +120,28 @@ def _strip_comments(text: str) -> str:
     return "".join(out)
 
 
+def _code_chars(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(index, char)`` for each character outside string literals.
+
+    A backslash inside a string escapes the next character, so
+    ``"quote: \\"("`` holds no code.
+    """
+    quote = ""
+    escaped = False
+    for i, ch in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        else:
+            yield i, ch
+
+
 def _split_statements(line: str) -> list[str]:
     """Split a line at ``{``, ``}`` and ``;`` outside string literals.
 
@@ -129,14 +151,8 @@ def _split_statements(line: str) -> list[str]:
     """
     statements: list[str] = []
     start = 0
-    quote = ""
-    for i, ch in enumerate(line):
-        if quote:
-            if ch == quote:
-                quote = ""
-        elif ch in ("'", '"'):
-            quote = ch
-        elif ch in "{};":
+    for i, ch in _code_chars(line):
+        if ch in "{};":
             statements.append(line[start:i])
             start = i + 1
     statements.append(line[start:])
@@ -152,58 +168,65 @@ _EXTRA_COORD_RE = re.compile(
 def _paren_depth(text: str) -> int:
     """Return the net number of ``(`` opened outside string literals."""
     depth = 0
-    quote = ""
-    for ch in text:
-        if quote:
-            if ch == quote:
-                quote = ""
-        elif ch in ("'", '"'):
-            quote = ch
-        elif ch == "(":
+    for _, ch in _code_chars(text):
+        if ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
     return depth
 
 
-# A call left open longer than this is not a declaration being read.
-_MAX_CALL_LINES = 50
-
-
-def _join_open_calls(code_lines: list[str]) -> list[tuple[int, str]]:
-    """Join a call that spans lines into one line, keeping its first line number.
+def _join_open_calls(
+    code_lines: list[str],
+) -> tuple[list[tuple[int, str]], list[int]]:
+    """Join a dependency call that spans lines into one line.
 
     implementation(
         group = "g",
         name = "a",
         version = "1.+",
     )
+
+    Only a call that starts a dependency configuration is joined, so an
+    unrelated open parenthesis cannot swallow the declarations after it.
+
+    :returns: ``(line number, text)`` per joined line, and the line numbers
+        of dependency calls that are never closed (and so cannot be read).
     """
     joined: list[tuple[int, str]] = []
+    unclosed: list[int] = []
     i = 0
     while i < len(code_lines):
-        start, text = i + 1, code_lines[i]
-        depth = _paren_depth(text)
+        start, parts = i + 1, [code_lines[i]]
         i += 1
-        while depth > 0 and i < len(code_lines) and i - start < _MAX_CALL_LINES:
-            text += " " + code_lines[i].strip()
-            depth += _paren_depth(code_lines[i])
-            i += 1
-        joined.append((start, text))
-    return joined
+        last = _split_statements(parts[0])[-1]
+        if _CONFIG_START_RE.match(last):
+            depth = _paren_depth(last)
+            while depth > 0 and i < len(code_lines):
+                parts.append(code_lines[i].strip())
+                depth += _paren_depth(code_lines[i])
+                i += 1
+            if depth > 0:
+                unclosed.append(start)
+        joined.append((start, " ".join(parts)))
+    return joined, unclosed
 
 
 def _declarations(
     lines: list[str],
-) -> list[tuple[int, str, str, str, Optional[str]]]:
+) -> tuple[list[tuple[int, str, str, str, Optional[str]]], list[int]]:
     """Return (line, config, group, artifact, version or None) per declaration.
 
     Comments are removed first, so a commented-out declaration is ignored
     even when it follows a brace or semicolon.
+
+    :returns: The declarations, and the line numbers of dependency calls
+        that are never closed.
     """
     found: list[tuple[int, str, str, str, Optional[str]]] = []
     code_lines = _strip_comments("".join(lines)).split("\n")
-    for lineno, code in _join_open_calls(code_lines):
+    joined, unclosed = _join_open_calls(code_lines)
+    for lineno, code in joined:
         for statement in _split_statements(code):
             m = _DEP_RE.match(statement)
             if m:
@@ -233,7 +256,7 @@ def _declarations(
                 config_match = _CONFIG_START_RE.match(statement)
                 config = config_match.group("config") if config_match else ""
                 found.append((lineno, config) + parsed)
-    return found
+    return found, unclosed
 
 
 def _is_bad_version(version: str) -> str:
@@ -287,7 +310,6 @@ def _parse_lockfile_coords(path: str) -> set[str]:
 
 
 _CATALOG_SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
-_CATALOG_ENTRY_RE = re.compile(r"""^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+?)\s*$""")
 _TOML_STRING_RE = re.compile(r"""^["']([^"']*)["']""")
 _VERSION_FIELD_RE = re.compile(
     r"""\b(version|strictly|require|prefer)\s*=\s*["']([^"']*)["']"""
@@ -325,9 +347,15 @@ def _catalog_entry_versions(section: str, value: str) -> Optional[list[str]]:
 def _strip_toml_comment(line: str) -> str:
     """Remove a ``#`` comment that is outside TOML strings."""
     quote = ""
+    escaped = False
     for i, ch in enumerate(line):
         if quote:
-            if ch == quote:
+            # Basic ("...") strings have escapes; literal ('...') do not.
+            if escaped:
+                escaped = False
+            elif ch == "\\" and quote == '"':
+                escaped = True
+            elif ch == quote:
                 quote = ""
         elif ch in ("'", '"'):
             quote = ch
@@ -336,12 +364,38 @@ def _strip_toml_comment(line: str) -> str:
     return line
 
 
-def _close_entry(entry: list) -> tuple[str, str, int, str]:
-    """Turn an accumulated [libraries.foo] table into an inline-table entry."""
-    alias, section, lineno, text = entry
-    if text.count("{") > text.count("}"):
-        text += "}"
-    return alias, section, lineno, "{ " + text + "}"
+_TOML_KEY_PART_RE = re.compile(
+    r"""\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(\.|$)"""
+)
+
+
+def _split_toml_key(key: str) -> Optional[list[str]]:
+    """Split a TOML key on dots outside quotes, unquoting each part.
+
+    ``libraries."foo.bar"`` is ``["libraries", "foo.bar"]``. Returns None
+    for text that is not a key.
+    """
+    parts: list[str] = []
+    pos = 0
+    key = key.strip()
+    while pos < len(key):
+        m = _TOML_KEY_PART_RE.match(key, pos)
+        if not m:
+            return None
+        parts.append(next(g for g in m.groups()[:3] if g is not None))
+        pos = m.end()
+        if not m.group(4):
+            break
+    return parts if parts and pos >= len(key) else None
+
+
+def _split_toml_assignment(line: str) -> Optional[tuple[list[str], str]]:
+    """Return ``(key parts, value)`` for a ``key = value`` line, or None."""
+    for i, ch in _code_chars(line):
+        if ch == "=":
+            parts = _split_toml_key(line[:i])
+            return (parts, line[i + 1 :].strip()) if parts else None
+    return None
 
 
 def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
@@ -349,8 +403,10 @@ def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
 
     ``[versions]`` entries, and the versions written inline in ``[libraries]``
     and ``[plugins]``, must be exact. Entries may be written inline
-    (``guava = { module = ..., version = ... }``) or as their own table
-    (``[libraries.guava]``). A library with neither a version nor a version
+    (``guava = { module = ..., version = ... }``), as dotted keys
+    (``guava.module = ...``), or as their own table (``[libraries.guava]``,
+    with an optional ``[libraries.guava.version]``). Aliases may be quoted
+    (``"guava.android"``). A library with neither a version nor a version
     reference resolves through a platform or constraint the catalog cannot
     show, so it is reported as missing a version. Rich versions
     (``{ strictly = ..., require = ..., prefer = ... }``) are checked field
@@ -362,44 +418,48 @@ def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
     except OSError:
         return []
 
-    # 1. Collect (alias, section, line, value text) for every entry. An
-    #    entry may be a table of its own ([libraries.foo]) with a nested
-    #    [libraries.foo.version] table, which belongs to the same entry.
-    entries: list[tuple[str, str, int, str]] = []
+    # 1. Collect every entry's value. An entry written as one ``alias = value``
+    #    keeps that value; one spread over dotted keys or tables collects its
+    #    fields (``version.ref = "x"``) into an inline table.
+    values: dict[tuple[str, str], tuple[int, str]] = {}  # (section, alias)
+    fields: dict[tuple[str, str], tuple[int, list[str]]] = {}
     section = ""
-    table_entry: Optional[list] = None  # [alias, section, line, text]
+    table: Optional[tuple[str, list[str]]] = None  # (alias, field prefix)
     for lineno, raw in enumerate(lines, start=1):
         line = _strip_toml_comment(raw)
         if not line.strip():
             continue
         m = _CATALOG_SECTION_RE.match(line)
         if m:
-            section = m.group(1).strip()
-            parts = [p.strip().strip("\"'") for p in section.split(".")]
-            if (
-                table_entry is not None
-                and len(parts) == 3
-                and [parts[0], parts[1]] == [table_entry[1], table_entry[0]]
-                and parts[2] == "version"
-            ):
-                table_entry[3] += "version = {"
-                continue
-            if table_entry is not None:
-                entries.append(_close_entry(table_entry))
-                table_entry = None
-            if len(parts) == 2 and parts[0] in _CATALOG_SECTIONS:
-                table_entry = [parts[1], parts[0], lineno, ""]
-            continue
-        if table_entry is not None:
-            table_entry[3] += line.strip() + " "
+            parts = _split_toml_key(m.group(1)) or []
+            section = parts[0] if parts else ""
+            table = None
+            if section in _CATALOG_SECTIONS and len(parts) >= 2:
+                table = (parts[1], parts[2:])
+                fields.setdefault((section, parts[1]), (lineno, []))
             continue
         if section not in _CATALOG_SECTIONS:
             continue
-        m = _CATALOG_ENTRY_RE.match(line)
-        if m:
-            entries.append((m.group(1), section, lineno, m.group(2)))
-    if table_entry is not None:
-        entries.append(_close_entry(table_entry))
+        assignment = _split_toml_assignment(line)
+        if assignment is None:
+            continue
+        key, value = assignment
+        if table is not None:
+            alias, path_parts = table[0], table[1] + key
+        elif len(key) == 1:
+            values.setdefault((section, key[0]), (lineno, value))
+            continue
+        else:
+            alias, path_parts = key[0], key[1:]
+        entry = fields.setdefault((section, alias), (lineno, []))
+        entry[1].append("{} = {}".format(".".join(path_parts), value))
+
+    entries: list[tuple[str, str, int, str]] = []
+    for (entry_section, alias), (lineno, value) in values.items():
+        entries.append((alias, entry_section, lineno, value))
+    for (entry_section, alias), (lineno, parts) in fields.items():
+        entries.append((alias, entry_section, lineno, "{ " + ", ".join(parts) + " }"))
+    entries.sort(key=lambda e: e[2])
 
     # 2. Check each declared version.
     findings: list[Finding] = []
@@ -510,9 +570,22 @@ class GradleChecker(Checker):
                         encoding="utf-8",
                         errors="replace",
                     ) as fh:
-                        declarations.append((fname, _declarations(fh.readlines())))
+                        decls, unclosed = _declarations(fh.readlines())
                 except OSError:
                     continue
+                declarations.append((fname, decls))
+                for lineno in unclosed:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=os.path.relpath(os.path.join(dir_path, fname), root),
+                            line=lineno,
+                            message=(
+                                "dependency declaration is never closed; it and the"
+                                " lines after it could not be checked"
+                            ),
+                        )
+                    )
 
             # The buildscript classpath is locked in its own file.
             classpath_in = [

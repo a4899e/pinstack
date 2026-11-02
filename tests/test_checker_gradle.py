@@ -367,7 +367,7 @@ def _decls(text):
     # type: (str) -> list
     from pinstack.checkers.gradle import _declarations
 
-    return [d[2:] for d in _declarations(text.splitlines(True))]
+    return [d[2:] for d in _declarations(text.splitlines(True))[0]]
 
 
 class TestGradleModernBuild:
@@ -649,4 +649,62 @@ class TestGradleCodexFollowUps:
         from pinstack.checkers.gradle import _declarations
 
         text = 'implementation(\n  "g:a:+"\n)\n'
-        assert [d[0] for d in _declarations(text.splitlines(True))] == [1]
+        assert [d[0] for d in _declarations(text.splitlines(True))[0]] == [1]
+
+    def test_quoted_alias_table_with_dots(self):
+        """Codex #15 follow-up: `"foo.bar"` is one alias, not three key parts."""
+        assert self._catalog(
+            '[libraries."foo.bar"]\nmodule = "g:a"\nversion = "+"\n'
+        ) == [(1, "foo.bar")]
+
+    def test_quoted_inline_alias_and_dotted_fields(self):
+        assert self._catalog(
+            "[libraries]\n"
+            '"foo.bar" = { module = "g:a", version = "+" }\n'
+            'baz.module = "g:b"\n'
+            'baz.version = "1.+"\n'
+            'ok.module = "g:c"\n'
+            'ok.version.ref = "x"\n'
+        ) == [(2, "foo.bar"), (3, "baz")]
+
+    def test_escaped_quote_does_not_open_a_call(self):
+        """Codex #15 follow-up: `\\"(` inside a string is not a parenthesis."""
+        assert _decls(
+            'dependencies {\n  println("quote: \\"(")\n  implementation("g:a:+")\n}\n'
+        ) == [("g", "a", "+")]
+
+    def test_unrelated_open_call_does_not_hide_declarations(self):
+        assert _decls('dependencies {\n  println(\n  implementation("g:a:+")\n}\n') == [
+            ("g", "a", "+")
+        ]
+
+    def test_long_multiline_call_is_read_whole(self):
+        """Codex #15 follow-up: blank lines inside a call must not truncate it."""
+        text = (
+            "dependencies {\n  implementation(\n"
+            + "\n" * 60
+            + '    group = "g", name = "a", version = "1.+"\n  )\n}\n'
+        )
+        assert _decls(text) == [("g", "a", "1.+")]
+
+    def test_unclosed_dependency_call_reported(self):
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "build.gradle.kts"), "w") as fh:
+                fh.write('dependencies {\n  implementation(\n    "g:a:1.0"\n}\n')
+            with open(os.path.join(d, "gradle.lockfile"), "w") as fh:
+                fh.write("g:a:1.0=runtimeClasspath\n")
+            index = {d: {"build.gradle.kts", "gradle.lockfile"}}
+            findings = GradleChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [(f.line, f.message) for f in findings] == [
+            (
+                2,
+                "dependency declaration is never closed; it and the lines after"
+                " it could not be checked",
+            )
+        ]
