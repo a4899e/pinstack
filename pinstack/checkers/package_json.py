@@ -6,7 +6,14 @@ import json
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex, is_commit_sha
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    describe_missing,
+    empty_lock_finding,
+    is_commit_sha,
+)
 
 # npm accepts many range forms (``*``, ``latest``, ``1.x``, ``1``, hyphen and
 # ``||`` ranges, dist-tags, git shorthands). Rather than enumerate the bad
@@ -88,6 +95,8 @@ _DEP_SECTIONS = (
     "peerDependencies",
     "optionalDependencies",
 )
+
+_PNPM_V5_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+")
 
 # Lock files that provide integrity verification for package.json
 _LOCK_FILES = frozenset(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
@@ -239,16 +248,23 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
             data = json.loads(content)
         except (ValueError, TypeError):
             return names
-        packages = data.get("packages", {})
-        for key in packages:
-            if not key:
-                continue  # skip root "" entry
-            # Strip node_modules/ prefix (possibly nested)
-            name = key
-            while name.startswith("node_modules/"):
-                name = name[len("node_modules/") :]
-            if name:
-                names.add(name)
+        if not isinstance(data, dict):
+            return names
+        # lockfileVersion 2 and 3 list "node_modules/<name>" paths under
+        # "packages"; lockfileVersion 1 (and v2, for compatibility) maps
+        # top-level names under "dependencies".
+        packages = data.get("packages")
+        if isinstance(packages, dict):
+            for key in packages:
+                if not key:
+                    continue  # skip root "" entry
+                # The installed name is the part after the last node_modules/
+                name = key.rsplit("node_modules/", 1)[-1]
+                if name:
+                    names.add(name)
+        dependencies = data.get("dependencies")
+        if isinstance(dependencies, dict):
+            names.update(k for k in dependencies if k)
     elif lock_filename == "yarn.lock":
         # Non-indented lines ending with : are package headers
         # e.g. "express@4.18.2:" or "express@^4.18.2, express@>=4.0.0:"
@@ -265,30 +281,89 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
                 else:
                     names.add(entry)
     elif lock_filename == "pnpm-lock.yaml":
-        # Package entries under packages: like /express@4.18.2: or /express/4.18.2:
+        # Entries under "packages:" are keyed by name and version:
+        #   v5:      /express/4.18.2:   /react-dom/18.2.0_react@18.2.0:
+        #   v6-v8:   /express@4.18.2:   /@scope/pkg@1.0.0(peer@1.0.0):
+        #   v9:      express@4.18.2:    '@scope/pkg@1.0.0':
         in_packages = False
         for line in content.splitlines():
             stripped = line.strip()
-            if stripped == "packages:":
-                in_packages = True
+            if not stripped:
+                continue  # blank lines separate entries
+            if line[0] not in (" ", "\t"):
+                in_packages = stripped == "packages:"
                 continue
-            if in_packages:
-                # End of packages section: non-indented line that isn't a package entry
-                if line and not line[0].isspace():
-                    in_packages = False
-                    continue
-                # Package entry lines start with / after stripping
-                if stripped.startswith("/"):
-                    entry = stripped.lstrip("/").rstrip(":")
-                    # Format: name@version or @scope/name@version
-                    # Find last @ that separates name from version
-                    at_pos = entry.rfind("@")
-                    if at_pos > 0:
-                        names.add(entry[:at_pos])
-                    else:
-                        names.add(entry)
+            if not in_packages or not stripped.endswith(":"):
+                continue
+            # Package keys are the least-indented lines in the section.
+            if len(line) - len(line.lstrip()) != 2:
+                continue
+            entry = stripped[:-1].strip("'\"").lstrip("/").split("(", 1)[0]
+            # v5 "name/version[_peer@x]": the last segment is the version.
+            name, sep, last = entry.rpartition("/")
+            if sep and _PNPM_V5_VERSION_RE.match(last):
+                names.add(name)
+                continue
+            at_pos = entry.rfind("@")
+            if at_pos > 0:
+                names.add(entry[:at_pos])
+            elif entry:
+                names.add(entry)
 
     return names
+
+
+_YARN_LOCK_MARKERS = re.compile(r"^(?:# yarn lockfile v1|__metadata:)", re.M)
+_PNPM_LOCK_MARKER = re.compile(r"^lockfileVersion:", re.M)
+
+
+def _js_lock_recognised(full_path: str, lock_filename: str) -> bool:
+    """Return True if a lock file is in a format its package manager writes.
+
+    A recognised lock may legitimately list no packages, but only when the
+    manifest declares nothing that needs a locked package (only local links,
+    or only optional peers that were not installed). An empty or
+    unrecognised file never may.
+    """
+    lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
+    try:
+        with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return False
+    if lock_filename == "package-lock.json":
+        try:
+            data = json.loads(content)
+        except (ValueError, TypeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        version = data.get("lockfileVersion")
+        if not isinstance(version, int):
+            return False
+        # From lockfileVersion 2 on, npm always writes "packages" with at
+        # least the root ("") entry.
+        return version < 2 or isinstance(data.get("packages"), dict)
+    if lock_filename == "yarn.lock":
+        return bool(_YARN_LOCK_MARKERS.search(content))
+    return bool(_PNPM_LOCK_MARKER.search(content))
+
+
+def _needs_lock_entry(data: dict, section: str, pkg: str, spec: object) -> bool:
+    """Return True if a declared dependency must appear in the lock file.
+
+    Local references are resolved from the tree, and an optional peer
+    (``peerDependenciesMeta.<pkg>.optional``) is not installed, so neither
+    has to be listed as a locked package.
+    """
+    if isinstance(spec, str) and _is_local(spec.strip()):
+        return False
+    if section == "peerDependencies":
+        meta = data.get("peerDependenciesMeta")
+        entry = meta.get(pkg) if isinstance(meta, dict) else None
+        if isinstance(entry, dict) and entry.get("optional") is True:
+            return False
+    return True
 
 
 class PackageJsonChecker(Checker):
@@ -376,33 +451,49 @@ class PackageJsonChecker(Checker):
                     )
                 )
             elif has_deps and found_lock_files:
-                # Cross-reference: check that every manifest dep appears in the lock file
-                lock_filename = sorted(found_lock_files)[0]
-                lock_names = _extract_js_lock_names(full_path, lock_filename)
-                if lock_names:
-                    missing: list[str] = []
-                    for section in _DEP_SECTIONS:
-                        deps = data.get(section)
-                        if not deps or not isinstance(deps, dict):
-                            continue
-                        for pkg in sorted(deps.keys()):
-                            if pkg not in lock_names:
-                                missing.append(pkg)
-                    if missing:
+                # Cross-reference: every manifest dep must appear in some lock
+                # file. A lock that yields no packages is reported unless it is
+                # in a recognised format and the manifest declares nothing that
+                # needs a locked package; another lock covering the deps does
+                # not excuse it. The cross-reference still runs against the
+                # rest.
+                needed = [
+                    pkg
+                    for section in _DEP_SECTIONS
+                    if isinstance(data.get(section), dict)
+                    for pkg, spec in sorted(data[section].items())
+                    if _needs_lock_entry(data, section, pkg, spec)
+                ]
+                lock_filenames = sorted(found_lock_files)
+                lock_names: set[str] = set()
+                for lock_filename in lock_filenames:
+                    names = _extract_js_lock_names(full_path, lock_filename)
+                    if not names and (
+                        needed or not _js_lock_recognised(full_path, lock_filename)
+                    ):
                         findings.append(
-                            Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=0,
-                                message="{} is stale: missing {} ({})".format(
-                                    lock_filename,
-                                    "{} dependency".format(len(missing))
-                                    if len(missing) == 1
-                                    else "{} dependencies".format(len(missing)),
-                                    ", ".join(sorted(missing)),
+                            empty_lock_finding(
+                                self.name,
+                                os.path.relpath(
+                                    os.path.join(dir_path, lock_filename), root
                                 ),
-                                integrity=True,
                             )
                         )
+                    lock_names |= names
+                missing = [pkg for pkg in needed if pkg not in lock_names]
+                if missing:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="{} {} stale: {}".format(
+                                ", ".join(lock_filenames),
+                                "is" if len(lock_filenames) == 1 else "are",
+                                describe_missing(missing),
+                            ),
+                            integrity=True,
+                        )
+                    )
 
         return findings
