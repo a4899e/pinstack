@@ -118,7 +118,7 @@ silently defeats the pinning it was supposed to guarantee.
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
 | `pnpm_lock` | `pnpm-lock.yaml` | `integrity` hashes present |
-| `dockerfile` | `Dockerfile*` | `@sha256:` digest on every `FROM` |
+| `dockerfile` | `Dockerfile*`, `Containerfile*`, `*.dockerfile` | `@sha256:` digest on every image pulled by `FROM`, `COPY --from`, and `RUN --mount=from=`; a bare name such as `alpine` is an image unless declared as a stage with `AS`, and `$VAR` references are reported because `--build-arg` can override them |
 | `compose` | `docker-compose*.yml`, `docker-compose*.yaml`, `compose*.yml`, `compose*.yaml` | `@sha256:` digest on `image:` references |
 | `github_actions` | `*.yml` and `*.yaml` under `.github/workflows/` | 40-char commit SHA after `@` in `uses:` |
 | `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present; every `require` appears in `go.sum` |

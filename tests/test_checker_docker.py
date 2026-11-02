@@ -97,13 +97,154 @@ class TestDockerfileNamed:
 
 
 class TestDockerfileMultistage:
-    def test_stage_alias_skipped(self):
-        """AS <alias> introduces bare alias name in subsequent FROM — should be skipped."""
+    def test_declared_stage_references_skipped(self):
+        """Declared stage names and indexes in FROM, COPY --from and RUN --mount are not images."""
         findings = _check_dockerfile("multistage")
-        # golang@sha256: is pinned (ok), runner is a bare alias (skipped)
-        assert findings == [], "Build stage aliases should be skipped, got: {}".format(
-            [f.message for f in findings]
+        assert findings == [], (
+            "Declared build stages should be skipped, got: {}".format(
+                [f.message for f in findings]
+            )
         )
+
+
+def _run_dockerfile(content, fname="Dockerfile"):
+    # type: (str, str) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, fname), "w") as fh:
+            fh.write(content)
+        return DockerfileChecker().check({d: {fname}}, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_DIGEST = "@sha256:" + "a1b2c3d4" * 8
+
+
+class TestDockerfileUnpinnedForms:
+    """Image references that are pulled unpinned even though they look harmless."""
+
+    def setup_method(self):
+        self.findings = _check_dockerfile("unpinned_forms")
+        self.by_line = {f.line: f.message for f in self.findings}
+
+    def test_five_findings(self):
+        """Bare image, $VAR, ${VAR}, continued FROM, and COPY --from=<image>."""
+        assert sorted(self.by_line) == [2, 3, 4, 5, 8], self.by_line
+
+    def test_bare_image_is_not_a_stage(self):
+        """`FROM alpine` names no declared stage, so it pulls alpine:latest."""
+        assert "'alpine' is not pinned" in self.by_line[2]
+
+    def test_variable_references_unverifiable(self):
+        """ARG-interpolated bases can be overridden with --build-arg."""
+        assert "'$BASE'" in self.by_line[3]
+        assert "'${BASE}'" in self.by_line[4]
+        assert "variable reference" in self.by_line[3]
+        assert "variable reference" in self.by_line[4]
+
+    def test_continuation_joined(self):
+        """`FROM \\` + next line is one instruction, reported at its first line."""
+        assert "'node:20'" in self.by_line[5]
+
+    def test_copy_from_image(self):
+        """COPY --from=<image> pulls the image when it is not a stage."""
+        assert self.by_line[8].startswith("COPY --from 'python:3.11'")
+
+    def test_all_integrity(self):
+        assert all(f.integrity for f in self.findings)
+
+
+class TestDockerfileStageTracking:
+    def test_stage_used_before_declaration_is_an_image(self):
+        """A stage name is only visible to instructions after its FROM ... AS."""
+        findings = _run_dockerfile("FROM base\nFROM python{} AS base\n".format(_DIGEST))
+        assert [f.line for f in findings] == [1]
+
+    def test_stage_names_case_insensitive(self):
+        """Docker stage names are case-insensitive."""
+        findings = _run_dockerfile(
+            "FROM python{} AS Builder\nFROM builder\nCOPY --from=BUILDER /a /b\n".format(
+                _DIGEST
+            )
+        )
+        assert findings == []
+
+    def test_copy_from_undeclared_bare_word(self):
+        """An undeclared bare --from value resolves to an image, not a stage."""
+        findings = _run_dockerfile("FROM scratch\nCOPY --from=busybox /bin/sh /sh\n")
+        assert len(findings) == 1
+        assert "'busybox'" in findings[0].message
+
+    def test_copy_from_pinned_image(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nCOPY --from=busybox{} /bin/sh /sh\n".format(_DIGEST)
+        )
+        assert findings == []
+
+    def test_add_from_and_other_flags(self):
+        """--from is found among other leading flags, on ADD as well as COPY."""
+        findings = _run_dockerfile(
+            "FROM scratch\nADD --chown=1:1 --from=busybox:1.36 /a /b\n"
+        )
+        assert len(findings) == 1
+        assert findings[0].message.startswith("ADD --from 'busybox:1.36'")
+
+
+class TestDockerfileRunMount:
+    def test_mount_from_image(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nRUN --mount=type=bind,from=python:3.11,target=/p ls /p\n"
+        )
+        assert len(findings) == 1
+        assert "RUN --mount from 'python:3.11'" in findings[0].message
+
+    def test_mount_without_from(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nRUN --mount=type=cache,target=/root/.cache pip install x\n"
+        )
+        assert findings == []
+
+    def test_mount_in_shell_command_ignored(self):
+        """A --mount inside the RUN command text is not a Dockerfile mount."""
+        findings = _run_dockerfile(
+            "FROM scratch\nRUN docker run --mount=type=bind,from=x,target=/y img\n"
+        )
+        assert findings == []
+
+
+class TestDockerfileContinuation:
+    def test_comment_lines_inside_continuation_dropped(self):
+        findings = _run_dockerfile("FROM \\\n# base image\n\n  python:3.11 AS app\n")
+        assert len(findings) == 1
+        assert findings[0].line == 1
+        assert "'python:3.11'" in findings[0].message
+
+    def test_escape_directive_backtick(self):
+        """`# escape=`` makes backtick the continuation character."""
+        findings = _run_dockerfile(
+            "# escape=`\nFROM `\n  mcr.microsoft.com/windows/servercore:ltsc2022\n"
+        )
+        assert len(findings) == 1
+        assert "servercore:ltsc2022" in findings[0].message
+
+    def test_from_scratch_still_skipped(self):
+        assert _run_dockerfile("FROM scratch\n") == []
+
+
+class TestDockerfilePatterns:
+    def test_containerfile_checked(self):
+        findings = _run_dockerfile("FROM alpine\n", fname="Containerfile")
+        assert len(findings) == 1
+
+    def test_dot_dockerfile_checked(self):
+        findings = _run_dockerfile("FROM alpine\n", fname="api.dockerfile")
+        assert len(findings) == 1
+
+    def test_patterns_listed(self):
+        patterns = DockerfileChecker.patterns
+        for p in ("Dockerfile*", "Containerfile*", "*.dockerfile"):
+            assert p in patterns
 
 
 class TestDockerfilePlatformFlag:
