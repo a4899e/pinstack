@@ -1,6 +1,7 @@
 """Tests for the pyproject checker."""
 
 import os
+import re
 import tempfile
 import shutil
 
@@ -12,15 +13,48 @@ from pinstack.checkers.pyproject import PyprojectChecker, extract_dependency_arr
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "pyproject")
 
 
+_NAME_TOKEN_RE = re.compile(
+    r"[\"']\s*([A-Za-z0-9][A-Za-z0-9._-]*)|^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*=", re.M
+)
+
+
+def _write_covering_lock(dirpath):
+    # type: (str) -> None
+    """Write a poetry.lock naming every package-like token in pyproject.toml.
+
+    Tests focused on pinning use this so they don't also pick up the
+    companion-lock-file or staleness findings. Extra names are harmless. An
+    existing poetry.lock is left alone so cross-reference tests keep theirs.
+    """
+    lock_path = os.path.join(dirpath, "poetry.lock")
+    if os.path.exists(lock_path):
+        return
+    with open(os.path.join(dirpath, "pyproject.toml")) as fh:
+        content = fh.read()
+    names = set()
+    for quoted, key in _NAME_TOKEN_RE.findall(content):
+        names.add(quoted or key)
+    with open(lock_path, "w") as fh:
+        for name in sorted(names):
+            fh.write('[[package]]\nname = "{}"\nversion = "1.0.0"\n\n'.format(name))
+
+
 def _check_subdir(subdir_name):
     # type: (str) -> list
-    """Run PyprojectChecker against the pyproject.toml in a named fixture subdir."""
+    """Run PyprojectChecker against a copy of a named fixture subdir.
+
+    The copy gets a covering poetry.lock so tests focused on pinning checks
+    don't also pick up the companion-lock-file warning.
+    """
     checker = PyprojectChecker()
-    dirpath = os.path.join(FIXTURES, subdir_name)
-    # Include a lock file in the index so tests focused on pinning checks don't
-    # also pick up the companion-lock-file warning.
-    index = {dirpath: {"pyproject.toml", "poetry.lock"}}
-    return checker.check(index, dirpath)
+    tmpdir = tempfile.mkdtemp()
+    try:
+        shutil.copy(os.path.join(FIXTURES, subdir_name, "pyproject.toml"), tmpdir)
+        _write_covering_lock(tmpdir)
+        index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
+        return checker.check(index, tmpdir)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +439,7 @@ class TestPyprojectCheckerOptionalDeps:
                     "]\n"
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             assert len(findings) == 1
@@ -424,6 +459,7 @@ class TestPyprojectCheckerHyphenatedOptionalKey:
                     '[project.optional-dependencies]\nlocal-llm = ["mlx-lm>=0.20.0"]\n'
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -452,6 +488,7 @@ class TestDependencyGroups:
                     "]\n"
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -478,6 +515,7 @@ class TestDependencyGroups:
                     "]\n"
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -501,6 +539,7 @@ class TestDependencyGroups:
                     'dev = [{include-group = "base"}, "ruff==0.15.5"]\n'
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -572,6 +611,7 @@ class TestPyprojectLockFileCheck:
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             lock_warnings = [f for f in findings if "lock file" in f.message]
@@ -583,11 +623,12 @@ class TestPyprojectLockFileCheck:
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "pdm.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "flask"\nversion = "2.3.2"\n')
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "pdm.lock"}}
             findings = checker.check(index, tmpdir)
-            lock_warnings = [f for f in findings if "lock file" in f.message]
-            assert lock_warnings == []
+            assert findings == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -595,11 +636,12 @@ class TestPyprojectLockFileCheck:
         tmpdir = tempfile.mkdtemp()
         try:
             _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            with open(os.path.join(tmpdir, "uv.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "flask"\nversion = "2.3.2"\n')
             checker = PyprojectChecker()
             index = {tmpdir: {"pyproject.toml", "uv.lock"}}
             findings = checker.check(index, tmpdir)
-            lock_warnings = [f for f in findings if "lock file" in f.message]
-            assert lock_warnings == []
+            assert findings == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -785,6 +827,7 @@ class TestPyprojectLockFileCrossRef:
                     'version = "2.0"\n'
                 )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             cross_ref = [f for f in findings if "stale" in f.message]
@@ -857,6 +900,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -879,6 +923,7 @@ class TestPoetryDependencies:
                 ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "^2.28"\n'),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -901,6 +946,7 @@ class TestPoetryDependencies:
                 ('[tool.poetry.dependencies]\npython = "^3.9"\nflask = "~2.3"\n'),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -926,6 +972,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -951,6 +998,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -978,6 +1026,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -1005,6 +1054,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -1026,6 +1076,7 @@ class TestPoetryDependencies:
                 ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "*"\n'),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -1047,6 +1098,7 @@ class TestPoetryDependencies:
                 ('[tool.poetry.dependencies]\npython = "^3.9"\nrequests = "2.28.0"\n'),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -1075,6 +1127,7 @@ class TestPoetryDependencies:
             with open(lock_path, "w") as fh:
                 fh.write('[[package]]\nname = "requests"\nversion = "2.28.0"\n')
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             stale = [f for f in findings if "stale" in f.message]
@@ -1096,6 +1149,7 @@ class TestPoetryDependencies:
                 ),
             )
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             pin_findings = [
@@ -1128,11 +1182,86 @@ class TestPoetryDependencies:
             with open(lock_path, "w") as fh:
                 fh.write('[[package]]\nname = "requests"\nversion = "2.28.0"\n')
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             stale = [f for f in findings if "stale" in f.message]
             assert len(stale) == 1
             assert "internal_lib" in stale[0].message
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class TestEmptyLockFailsClosed:
+    """Review repro M1: an empty lock must not satisfy the lock requirement."""
+
+    def test_zero_byte_uv_lock(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                '[project]\nname="x"\nversion="1"\ndependencies=["requests==2.31.0"]\n',
+            )
+            open(os.path.join(tmpdir, "uv.lock"), "w").close()
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "uv.lock"}}, tmpdir
+            )
+            by_path = {f.path: f for f in findings}
+            assert sorted(by_path) == ["pyproject.toml", "uv.lock"]
+            assert by_path["uv.lock"].message == (
+                "uv.lock contains no packages (empty or unrecognised format)"
+            )
+            assert by_path["uv.lock"].integrity
+            assert (
+                "missing 1 dependency (requests)" in by_path["pyproject.toml"].message
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_empty_lock_beside_populated_lock(self):
+        """Each empty lock is reported even when another lock covers the deps."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_WITH_DEPS)
+            open(os.path.join(tmpdir, "pdm.lock"), "w").close()
+            with open(os.path.join(tmpdir, "uv.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "flask"\nversion = "2.3.2"\n')
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "pdm.lock", "uv.lock"}}, tmpdir
+            )
+            assert [
+                (f.path, "contains no packages" in f.message) for f in findings
+            ] == [("pdm.lock", True)]
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_missing_list_deduplicated(self):
+        """A dependency in two groups is listed once."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                '[project]\nname="x"\nversion="1"\ndependencies=["requests==2.31.0"]\n'
+                '[dependency-groups]\ndev=["requests==2.31.0"]\n',
+            )
+            open(os.path.join(tmpdir, "uv.lock"), "w").close()
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "uv.lock"}}, tmpdir
+            )
+            stale = [f.message for f in findings if "stale" in f.message]
+            assert stale == ["lock files are stale: missing 1 dependency (requests)"]
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_empty_lock_without_deps_not_reported(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, _PYPROJECT_NO_DEPS)
+            open(os.path.join(tmpdir, "uv.lock"), "w").close()
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "uv.lock"}}, tmpdir
+            )
+            assert findings == []
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1151,9 +1280,8 @@ class TestPEP508DirectReferences:
             )
             with open(os.path.join(tmpdir, "pyproject.toml"), "w") as fh:
                 fh.write(content)
-            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
-                fh.write("")  # stub lock file
             checker = PyprojectChecker()
+            _write_covering_lock(tmpdir)
             index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
             findings = checker.check(index, tmpdir)
             return [

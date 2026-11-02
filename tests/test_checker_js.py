@@ -75,6 +75,223 @@ class TestPackageJsonGood:
         assert _check_empty(PackageJsonChecker()) == []
 
 
+class TestPackageJsonNonExactForms:
+    """npm range forms beyond ^ ~ > < must not pass as pinned."""
+
+    def setup_method(self):
+        self.findings = _check_fixture_dir(
+            PackageJsonChecker(),
+            "package_json/ranges",
+            extra_files={"package-lock.json"},
+        )
+        self.by_pkg = {f.message.split("'")[1]: f for f in self.findings}
+
+    def test_eleven_findings(self):
+        assert sorted(self.by_pkg) == list("abcdefghijk"), [
+            f.message for f in self.findings
+        ]
+
+    def test_wildcards_and_tags_not_exact_semver(self):
+        for pkg in "abcdk":
+            assert "not exact semver" in self.by_pkg[pkg].message, pkg
+            assert not self.by_pkg[pkg].integrity
+
+    def test_hyphen_and_or_ranges_unpinned(self):
+        for pkg in "ef":
+            assert "unpinned version" in self.by_pkg[pkg].message, pkg
+            assert not self.by_pkg[pkg].integrity
+
+    def test_git_sources_not_content_addressed(self):
+        """user/repo, scp-style git@ and ssh:// all fetch a moving ref."""
+        for pkg in "ghi":
+            assert "not content-addressed" in self.by_pkg[pkg].message, pkg
+            assert self.by_pkg[pkg].integrity
+
+    def test_alias_range_unpinned(self):
+        assert "unpinned version 'npm:other@^1.0.0'" in self.by_pkg["j"].message
+
+
+def _classify(version):
+    # type: (object) -> tuple
+    from pinstack.checkers.package_json import _is_unpinned
+
+    return _is_unpinned(version)
+
+
+class TestPackageJsonVersionAllowlist:
+    """Unit tests for the version-spec allowlist."""
+
+    _SHA = "ab12" * 10
+
+    def test_exact_semver_accepted(self):
+        for v in ("1.2.3", "0.0.0", "1.2.3-rc.1", "1.2.3+build.5", "v1.2.3", "=1.2.3"):
+            assert _classify(v) == (False, ""), v
+
+    def test_local_references_accepted(self):
+        for v in (
+            "workspace:*",
+            "file:../x",
+            "link:../x",
+            "portal:../x",
+            "./x",
+            "../x",
+            "/abs/x",
+            "~/x",
+        ):
+            assert _classify(v) == (False, ""), v
+
+    def test_alias_exact_accepted(self):
+        assert _classify("npm:other@1.0.0") == (False, "")
+        assert _classify("npm:@scope/other@1.0.0") == (False, "")
+
+    def test_yarn_nameless_alias(self):
+        """yarn accepts npm:<version> for the same package name."""
+        assert _classify("npm:1.2.3") == (False, "")
+        assert _classify("npm:^1.2.3") == (True, "unpinned version")
+
+    def test_loose_identifiers_rejected(self):
+        """Empty identifiers and non-ASCII digits are dist-tags to npm, not versions."""
+        for v in ("1.2.3-..", "1.2.3-", "1.2.3+", "1.2.3-a..b", "\u0661.\u0662.\u0663"):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
+    def test_versions_beyond_semver_limits_rejected(self):
+        """node-semver rejects these, so npm treats them as moveable dist-tags."""
+        assert _classify("9007199254740992.0.0") == (True, "not exact semver")
+        assert _classify("1.9007199254740992.0") == (True, "not exact semver")
+        assert _classify("npm:x@0.0.9007199254740992") == (True, "not exact semver")
+        assert _classify("1.0.0-" + "a" * 260) == (True, "not exact semver")
+        assert _classify("9007199254740991.0.0") == (False, "")
+
+    def test_alias_without_version_flagged(self):
+        assert _classify("npm:other") == (True, "not exact semver")
+        assert _classify("npm:@scope/other") == (True, "not exact semver")
+        assert _classify("npm:other@latest") == (True, "not exact semver")
+
+    def test_git_with_commit_sha_accepted(self):
+        for v in (
+            "git+https://github.com/u/r.git#" + self._SHA,
+            "git+ssh://git@github.com/u/r.git#" + self._SHA,
+            "github:u/r#" + self._SHA,
+            "u/r#" + self._SHA,
+            "https://github.com/u/r#" + self._SHA,
+            "https://gitlab.com/u/r.git#" + self._SHA,
+            "git+https://github.com/u/r.git#" + self._SHA + "::path:packages/x",
+        ):
+            assert _classify(v) == (False, ""), v
+
+    def test_git_with_moving_ref_flagged(self):
+        for v in (
+            "git+https://github.com/u/r.git",
+            "git+https://github.com/u/r.git#main",
+            "github:u/r#v1.0.0",
+            "u/r#semver:^1.0.0",
+            "u/r#" + self._SHA[:7],
+            "gitlab:u/r",
+            "git://github.com/u/r.git",
+            "u/r#" + self._SHA.upper(),
+            "github:u/r#branch=main&commit=" + self._SHA,
+            "github:u/r#commit=" + self._SHA,
+            "github:u/r#" + self._SHA + "&workspace=x",
+            "github:u/r#" + self._SHA + "&tag=v1",
+            "https://github.com/u/r",
+        ):
+            assert _classify(v) == (True, "not content-addressed"), v
+
+    def test_windows_and_bare_local_paths_accepted(self):
+        for v in (".", "..", ".\\x", "..\\x", "C:\\x", "c:/x"):
+            assert _classify(v) == (False, ""), v
+
+    def test_tarball_url_flagged(self):
+        assert _classify("https://x.test/p.tgz") == (True, "not content-addressed")
+        assert _classify("https://github.com/u/r/archive/main.tar.gz") == (
+            True,
+            "not content-addressed",
+        )
+        assert _classify("https://x.test/p.tgz#" + self._SHA) == (
+            True,
+            "not content-addressed",
+        )
+
+    def test_comparator_ranges_unpinned(self):
+        for v in (
+            "^1.0.0",
+            "~1.0.0",
+            ">=1.0.0",
+            "<2",
+            ">=1.0.0 <2.0.0",
+            "1 || 2",
+            "1.0.0 - 2.0.0",
+        ):
+            assert _classify(v) == (True, "unpinned version"), v
+
+    def test_other_forms_not_exact(self):
+        for v in ("*", "x", "", "  ", "latest", "next", "1", "1.2", "1.2.x", "1.x.x"):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
+    def test_non_string_flagged(self):
+        """npm rejects non-string specs; the gate must not treat them as pinned."""
+        for v in (None, 1, 1.5, {"version": "1.0.0"}):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
+
+def _run_package_json(data):
+    # type: (dict) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "package.json"), "w") as fh:
+            json.dump(data, fh)
+        return PackageJsonChecker().check({d: {"package.json"}}, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestPackageJsonOverrides:
+    """overrides/resolutions replace a dependency's resolved version."""
+
+    def test_npm_override_range_flagged(self):
+        findings = _run_package_json(
+            {"dependencies": {"a": "1.0.0"}, "overrides": {"a": "^2"}}
+        )
+        msgs = [f.message for f in findings if "overrides" in f.message]
+        assert msgs == [
+            "'a' in overrides has unpinned version '^2'; use an exact version"
+        ]
+
+    def test_npm_nested_override_flagged_with_path(self):
+        findings = _run_package_json(
+            {"overrides": {"foo": {".": "1.0.0", "bar": "latest"}}}
+        )
+        assert [f.message.split("'")[1] for f in findings] == ["foo > bar"]
+
+    def test_npm_override_dollar_reference_accepted(self):
+        """`$a` defers to the direct dependency, which is checked itself."""
+        findings = _run_package_json(
+            {"dependencies": {"a": "1.0.0"}, "overrides": {"a": "$a"}}
+        )
+        assert [f for f in findings if "overrides" in f.message] == []
+
+    def test_yarn_resolutions_flagged(self):
+        findings = _run_package_json({"resolutions": {"a/**/b": "1.x", "c": "1.0.0"}})
+        assert [f.message.split("'")[1] for f in findings] == ["a/**/b"]
+        assert "resolutions" in findings[0].message
+
+    def test_pnpm_overrides_flagged_and_removal_accepted(self):
+        findings = _run_package_json(
+            {"pnpm": {"overrides": {"a": "~1.0.0", "b": "-", "c": "1.0.0"}}}
+        )
+        assert [f.message.split("'")[1] for f in findings] == ["a"]
+        assert "pnpm.overrides" in findings[0].message
+
+    def test_removal_marker_only_for_pnpm(self):
+        findings = _run_package_json({"overrides": {"a": "-"}})
+        assert len(findings) == 1
+
+    def test_overrides_alone_need_no_lock(self):
+        """Overrides are not dependencies, so they don't trigger the lock requirement."""
+        findings = _run_package_json({"overrides": {"a": "1.0.0"}})
+        assert findings == []
+
+
 class TestPackageJsonBad:
     def setup_method(self):
         self.findings = _check_fixture_dir(PackageJsonChecker(), "package_json/bad")
@@ -528,3 +745,296 @@ class TestPackageJsonLockFileCrossRef:
             assert "pnpm-lock.yaml" in cross_ref[0].message
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Lock files that parse to no packages (fail closed)
+# ---------------------------------------------------------------------------
+
+
+def _run_with_lock(lock_name, lock_content, deps=None):
+    # type: (str, str, dict) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "package.json"), "w") as fh:
+            json.dump({"dependencies": deps or {"left-pad": "1.3.0"}}, fh)
+        with open(os.path.join(d, lock_name), "w") as fh:
+            fh.write(lock_content)
+        return PackageJsonChecker().check({d: {"package.json", lock_name}}, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestPackageJsonEmptyLock:
+    def test_empty_object_package_lock(self):
+        """Review repro M1: package-lock.json containing {} satisfied the gate."""
+        findings = _run_with_lock("package-lock.json", "{}")
+        by_path = {f.path: f.message for f in findings}
+        assert by_path["package-lock.json"] == (
+            "package-lock.json contains no packages (empty or unrecognised format)"
+        )
+        assert "missing 1 dependency (left-pad)" in by_path["package.json"]
+        assert all(f.integrity for f in findings)
+
+    def test_unparseable_package_lock(self):
+        findings = _run_with_lock("package-lock.json", "not json")
+        assert any("contains no packages" in f.message for f in findings)
+
+    def test_zero_byte_yarn_lock(self):
+        findings = _run_with_lock("yarn.lock", "")
+        assert any(f.path == "yarn.lock" for f in findings)
+
+    def test_lockfile_v1_dependencies_map(self):
+        """lockfileVersion 1 lists packages under "dependencies", not "packages"."""
+        lock = json.dumps(
+            {
+                "lockfileVersion": 1,
+                "dependencies": {"left-pad": {"version": "1.3.0", "integrity": "x"}},
+            }
+        )
+        assert _run_with_lock("package-lock.json", lock) == []
+
+    def test_nested_node_modules_key(self):
+        lock = json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {},
+                    "node_modules/a/node_modules/@s/left-pad": {"version": "1.3.0"},
+                },
+            }
+        )
+        assert _run_with_lock("package-lock.json", lock, {"@s/left-pad": "1.3.0"}) == []
+
+    def test_pnpm_v9_keys_without_slash(self):
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "importers:\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      left-pad:\n"
+            "        specifier: 1.3.0\n"
+            "        version: 1.3.0\n"
+            "packages:\n"
+            "  left-pad@1.3.0:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "  '@s/p@1.0.0':\n"
+            "    resolution: {integrity: sha512-y}\n"
+            "snapshots:\n"
+            "  left-pad@1.3.0: {}\n"
+        )
+        findings = _run_with_lock(
+            "pnpm-lock.yaml", lock, {"left-pad": "1.3.0", "@s/p": "1.0.0"}
+        )
+        assert findings == []
+
+    def test_pnpm_v6_peer_suffix_and_v5_slash_version(self):
+        lock = (
+            "lockfileVersion: 5.4\n"
+            "packages:\n"
+            "  /left-pad/1.3.0:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "  /@s/p@1.0.0(react@18.2.0):\n"
+            "    resolution: {integrity: sha512-y}\n"
+        )
+        findings = _run_with_lock(
+            "pnpm-lock.yaml", lock, {"left-pad": "1.3.0", "@s/p": "1.0.0"}
+        )
+        assert findings == []
+
+    def test_pnpm_lock_without_packages_section(self):
+        """A recognised but package-free lock still fails a required dependency."""
+        findings = _run_with_lock("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+        assert [f.message for f in findings] == [
+            "pnpm-lock.yaml contains no packages (empty or unrecognised format)",
+            "pnpm-lock.yaml is stale: missing 1 dependency (left-pad)",
+        ]
+
+    def test_pnpm_real_layout_with_blank_lines(self):
+        """pnpm v6-v9 separate sections and entries with blank lines."""
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "\n"
+            "settings:\n"
+            "  autoInstallPeers: true\n"
+            "\n"
+            "importers:\n"
+            "\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      express:\n"
+            "        specifier: 4.18.2\n"
+            "        version: 4.18.2\n"
+            "\n"
+            "packages:\n"
+            "\n"
+            "  accepts@1.3.8:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "\n"
+            "  express@4.18.2:\n"
+            "    resolution: {integrity: sha512-y}\n"
+            "\n"
+            "snapshots:\n"
+            "\n"
+            "  express@4.18.2: {}\n"
+        )
+        assert _run_with_lock("pnpm-lock.yaml", lock, {"express": "4.18.2"}) == []
+
+    def test_pnpm_v5_peer_suffix(self):
+        lock = (
+            "lockfileVersion: 5.4\n"
+            "\n"
+            "packages:\n"
+            "\n"
+            "  /react-dom/18.2.0_react@18.2.0:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "\n"
+            "  /@s/p/1.0.0_react@18.2.0:\n"
+            "    resolution: {integrity: sha512-y}\n"
+            "\n"
+            "  /7zip-bin/5.1.1:\n"
+            "    resolution: {integrity: sha512-z}\n"
+        )
+        deps = {"react-dom": "18.2.0", "@s/p": "1.0.0", "7zip-bin": "5.1.1"}
+        assert _run_with_lock("pnpm-lock.yaml", lock, deps) == []
+
+    def test_pnpm_v6_name_starting_with_digit(self):
+        lock = "lockfileVersion: '6.0'\npackages:\n  /7zip-bin@5.1.1:\n    x: y\n"
+        assert _run_with_lock("pnpm-lock.yaml", lock, {"7zip-bin": "5.1.1"}) == []
+
+
+class TestPackageJsonMultipleLocks:
+    def test_empty_lock_beside_valid_lock(self):
+        """The valid lock still satisfies the cross-reference; the empty one is reported."""
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                json.dump({"dependencies": {"left-pad": "1.3.0"}}, fh)
+            with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                fh.write("{}")
+            with open(os.path.join(d, "yarn.lock"), "w") as fh:
+                fh.write('left-pad@1.3.0:\n  version "1.3.0"\n  integrity sha512-x\n')
+            index = {d: {"package.json", "package-lock.json", "yarn.lock"}}
+            findings = PackageJsonChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [(f.path, f.message) for f in findings] == [
+            (
+                "package-lock.json",
+                "package-lock.json contains no packages (empty or unrecognised format)",
+            )
+        ]
+
+    def test_stale_message_names_every_lock(self):
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                json.dump({"dependencies": {"a": "1.0.0", "b": "1.0.0"}}, fh)
+            with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                json.dump({"packages": {"node_modules/a": {}}}, fh)
+            with open(os.path.join(d, "yarn.lock"), "w") as fh:
+                fh.write("a@1.0.0:\n  version 1.0.0\n")
+            index = {d: {"package.json", "package-lock.json", "yarn.lock"}}
+            findings = PackageJsonChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "package-lock.json, yarn.lock are stale: missing 1 dependency (b)"
+        ]
+
+
+class TestPackageJsonValidEmptyLock:
+    """Codex review of #12: a valid lock can legitimately list no packages."""
+
+    def test_npm_lock_with_only_root_and_optional_peer(self):
+        """npm writes a root-only lock when the only dependency is an optional peer."""
+        d = tempfile.mkdtemp()
+        try:
+            manifest = {
+                "name": "x",
+                "version": "1.0.0",
+                "peerDependencies": {"optional-peer": "1.0.0"},
+                "peerDependenciesMeta": {"optional-peer": {"optional": True}},
+            }
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                json.dump(manifest, fh)
+            with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                json.dump(
+                    {
+                        "name": "x",
+                        "version": "1.0.0",
+                        "lockfileVersion": 3,
+                        "requires": True,
+                        "packages": {"": {"name": "x", "version": "1.0.0"}},
+                    },
+                    fh,
+                )
+            findings = PackageJsonChecker().check(
+                {d: {"package.json", "package-lock.json"}}, d
+            )
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert findings == []
+
+    def test_required_peer_still_needs_lock_entry(self):
+        lock = json.dumps({"lockfileVersion": 3, "packages": {"": {}}})
+        findings = _run_with_lock("package-lock.json", lock)
+        assert [f.message for f in findings] == [
+            "package-lock.json contains no packages (empty or unrecognised format)",
+            "package-lock.json is stale: missing 1 dependency (left-pad)",
+        ]
+
+    def test_marker_only_lock_not_excused_by_another_lock(self):
+        """Codex #12 follow-up: yarn.lock covering `a` must not make a bare npm marker valid."""
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                json.dump({"dependencies": {"a": "1.0.0"}}, fh)
+            with open(os.path.join(d, "yarn.lock"), "w") as fh:
+                fh.write('a@1.0.0:\n  version "1.0.0"\n  integrity sha512-x\n')
+            with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                fh.write('{"lockfileVersion":3}')
+            index = {d: {"package.json", "package-lock.json", "yarn.lock"}}
+            findings = PackageJsonChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [(f.path, f.message) for f in findings] == [
+            (
+                "package-lock.json",
+                "package-lock.json contains no packages (empty or unrecognised format)",
+            )
+        ]
+
+    def test_v3_lock_without_packages_is_unrecognised(self):
+        """npm v2+ locks always have "packages"; a bare marker is not one npm writes."""
+        findings = _run_with_lock(
+            "package-lock.json", '{"lockfileVersion":3}', {"a": "file:../a"}
+        )
+        assert [f.message for f in findings] == [
+            "package-lock.json contains no packages (empty or unrecognised format)"
+        ]
+
+    def test_pnpm_lock_with_only_local_links(self):
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "\n"
+            "importers:\n"
+            "\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      shared:\n"
+            "        specifier: link:../shared\n"
+            "        version: link:../shared\n"
+        )
+        assert (
+            _run_with_lock("pnpm-lock.yaml", lock, {"shared": "link:../shared"}) == []
+        )
+
+    def test_unrecognised_lock_still_reported(self):
+        """The M1 repro: `{}` is not a lock npm writes."""
+        findings = _run_with_lock("package-lock.json", "{}")
+        assert any("contains no packages" in f.message for f in findings)
+
+    def test_yarn_lock_header_only(self):
+        lock = "# THIS IS AN AUTOGENERATED FILE.\n# yarn lockfile v1\n\n\n"
+        assert _run_with_lock("yarn.lock", lock, {"a": "file:../a"}) == []

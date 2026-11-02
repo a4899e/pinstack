@@ -7,7 +7,15 @@ import os
 import re
 from typing import Optional
 
-from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    describe_missing,
+    empty_lock_finding,
+    is_commit_sha,
+    validate_url_fragment_hashes,
+)
 
 # Sections we care about (PEP 621 + PEP 735)
 _SECTION_PROJECT = "project"
@@ -691,7 +699,7 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
             at_pos = url_part.rfind("@")
             if at_pos >= 0:
                 ref = url_part[at_pos + 1 :]
-                if re.match(r"^[0-9a-f]{40}$", ref):
+                if is_commit_sha(ref):
                     return False, ""
             pkg_name = dep.split(" @ ", 1)[0].strip()
             return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(
@@ -880,9 +888,24 @@ class PyprojectChecker(Checker):
             for req_file in req_candidates:
                 lock_names |= _extract_lock_file_names(full_path, req_file)
             exact_lock_files = sorted(files & _LOCK_FILES_EXACT)
+            empty_lock_files: list[str] = []
             for lock_file in exact_lock_files:
-                lock_names |= _extract_lock_file_names(full_path, lock_file)
+                names = _extract_lock_file_names(full_path, lock_file)
+                if not names:
+                    empty_lock_files.append(lock_file)
+                lock_names |= names
             has_lock_files = bool(lock_names) or bool(exact_lock_files)
+
+            # An unreadable lock must not satisfy the lock requirement; report
+            # it, and the staleness check below reports what it fails to cover.
+            if has_deps:
+                for lock_file in empty_lock_files:
+                    findings.append(
+                        empty_lock_finding(
+                            self.name,
+                            os.path.relpath(os.path.join(dir_path, lock_file), root),
+                        )
+                    )
 
             if has_deps and not has_lock_files:
                 findings.append(
@@ -895,33 +918,29 @@ class PyprojectChecker(Checker):
                     )
                 )
             elif has_deps and has_lock_files:
-                if lock_names:
-                    missing: list[str] = []
-                    for deps, label in dep_arrays:
-                        for dep in deps:
-                            raw_name = _extract_name_from_dep(dep)
-                            normalized = _normalize_python_name(raw_name)
-                            if normalized not in lock_names:
-                                missing.append(normalized)
-                    for pkg, version, lineno in poetry_deps:
-                        normalized = _normalize_python_name(pkg)
+                missing: list[str] = []
+                for deps, label in dep_arrays:
+                    for dep in deps:
+                        raw_name = _extract_name_from_dep(dep)
+                        normalized = _normalize_python_name(raw_name)
                         if normalized not in lock_names:
                             missing.append(normalized)
-                    if missing:
-                        findings.append(
-                            Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=0,
-                                message="lock files are stale: missing {} ({})".format(
-                                    "{} dependency".format(len(set(missing)))
-                                    if len(set(missing)) == 1
-                                    else "{} dependencies".format(len(set(missing))),
-                                    ", ".join(sorted(set(missing))),
-                                ),
-                                integrity=True,
-                            )
+                for pkg, version, lineno in poetry_deps:
+                    normalized = _normalize_python_name(pkg)
+                    if normalized not in lock_names:
+                        missing.append(normalized)
+                if missing:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="lock files are stale: {}".format(
+                                describe_missing(missing)
+                            ),
+                            integrity=True,
                         )
+                    )
 
         return findings
 
