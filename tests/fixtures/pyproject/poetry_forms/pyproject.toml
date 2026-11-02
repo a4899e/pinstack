@@ -1,0 +1,10 @@
+[tool.poetry]
+name="x"
+[tool.poetry.dependencies]
+python="^3.9"
+foo = [{ version = "^1.0", python = "<3.8" }]
+bar = [
+  { version = "^2.0", python = "<3.8" },
+]
+[tool.poetry.dependencies.baz]
+version = "^3.0"

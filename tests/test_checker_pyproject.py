@@ -1353,3 +1353,277 @@ class TestPEP508DirectReferences:
             "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         assert len(findings) == 0
+
+
+def _check_fixture(subdir_name):
+    # type: (str) -> list
+    """Run the checker on a fixture dir with its real lock file, as the CLI would."""
+    from pinstack.core import build_index
+
+    dirpath = os.path.join(FIXTURES, subdir_name)
+    index = build_index(dirpath, set(PyprojectChecker.patterns))
+    return PyprojectChecker().check(index, dirpath)
+
+
+class TestWildcardVersions:
+    """Review repro M4a: `==2.*` is a PEP 440 prefix match, not a pin."""
+
+    def test_pep508_and_poetry_wildcards_flagged(self):
+        findings = _check_fixture("wildcard")
+        assert [(f.line, f.message) for f in findings] == [
+            (4, "'requests' uses wildcard '==2.*'; pin to an exact version"),
+            (7, "'flask' uses wildcard '2.*'; use exact pinning"),
+        ]
+
+    def test_poetry_double_equals_wildcard(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        assert _check_poetry_version("x", "==1.2.*")[0]
+        assert not _check_poetry_version("x", "==1.2.3")[0]
+
+    def test_requirements_wildcard_is_a_pin_error(self):
+        from pinstack.checkers.requirements import _check_line
+
+        skip, pin_error, hash_warn, _ = _check_line("requests==2.*")
+        assert pin_error and not hash_warn
+
+
+class TestInlineTableProject:
+    """Review repro M4b: PEP 621 tables written as inline tables or dotted keys."""
+
+    def test_inline_project_table(self):
+        findings = _check_fixture("inline_project")
+        assert [f.message for f in findings] == [
+            "'requests>=2' uses '>=' instead of '=='; use exact pinning"
+        ]
+
+    def test_multiline_inline_table(self):
+        arrays = extract_dependency_arrays(
+            "project = {\n"
+            '  name = "x",\n'
+            '  dependencies = [\n    "a>=1",  # comment\n  ],\n'
+            "}\n"
+            '[tool.other]\nx = ["b>=1"]\n'
+        )
+        assert arrays == [(["a>=1"], "dependencies")]
+
+    def test_optional_dependencies_inline_under_project(self):
+        arrays = extract_dependency_arrays(
+            '[project]\nname = "x"\noptional-dependencies = { dev = ["pytest>=7"] }\n'
+        )
+        assert arrays == [(["pytest>=7"], "dev")]
+
+    def test_dotted_keys(self):
+        arrays = extract_dependency_arrays(
+            'project.dependencies = ["a>=1"]\n'
+            "[project]\n"
+            'optional-dependencies.dev = ["b>=1"]\n'
+        )
+        assert arrays == [(["a>=1"], "dependencies"), (["b>=1"], "dev")]
+
+    def test_dependency_groups_inline_skips_include_group(self):
+        arrays = extract_dependency_arrays(
+            'dependency-groups = { dev = ["pytest>=7", { include-group = "lint" }] }\n'
+        )
+        assert arrays == [(["pytest>=7"], "dev")]
+
+    def test_other_inline_tables_ignored(self):
+        arrays = extract_dependency_arrays(
+            '[project]\nlicense = { text = "MIT" }\nurls = { home = "https://x" }\n'
+            '[tool.poetry.dependencies]\nfoo = { version = "^1", extras = ["a"] }\n'
+        )
+        assert arrays == []
+
+
+class TestPoetryDependencyForms:
+    """Review repro M4c+d: table-form and multi-constraint Poetry dependencies."""
+
+    def test_combined_repro(self):
+        findings = _check_fixture("poetry_forms")
+        assert [(f.line, f.message.split("'")[1]) for f in findings] == [
+            (5, "foo"),
+            (6, "bar"),
+            (9, "baz"),
+        ]
+
+    def test_every_constraint_checked(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            "foo = [\n"
+            '  { version = "1.0.0", python = "<3.8" },\n'
+            '  { version = "^2.0", python = ">=3.8" },\n'
+            '  { git = "https://x", python = ">=3.12" },\n'
+            "]\n"
+            'after = "1.0.0"\n'
+        )
+        assert deps == [
+            ("foo", "1.0.0", 2),
+            ("foo", "^2.0", 2),
+            ("foo", "", 2),
+            ("after", "1.0.0", 7),
+        ]
+
+    def test_table_form_in_groups_and_without_version(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.group.dev.dependencies.lint]\n"
+            'version = "1.0.0"  # pinned\n'
+            "[tool.poetry.dev-dependencies.gitdep]\n"
+            'git = "https://x"\n'
+            "[tool.poetry.dependencies.python]\n"
+            'version = "^3.9"\n'
+        )
+        assert deps == [("lint", "1.0.0", 1), ("gitdep", "", 3)]
+
+
+class TestPyprojectReviewFollowUps:
+    """Follow-ups from the local and Codex reviews of the M4 changes."""
+
+    def test_quoted_dotted_poetry_table_name(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            '[tool.poetry.dependencies."zope.interface"]\nversion = "^5"\n'
+        )
+        assert deps == [("zope.interface", "^5", 1)]
+
+    def test_poetry_inline_and_dotted_dependency_tables(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry]\n"
+            'dependencies = { requests = "^2", flask = { version = "2.3.2" } }\n'
+            'dependencies.boto3 = "^1"\n'
+            'group.dev.dependencies.pytest = "7.4.0"\n'
+            'dependencies.black.version = "^23"\n'
+        )
+        assert deps == [
+            ("requests", "^2", 2),
+            ("flask", "2.3.2", 2),
+            ("boto3", "^1", 3),
+            ("pytest", "7.4.0", 4),
+            ("black", "^23", 5),
+        ]
+
+    def test_multiline_poetry_inline_table(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            "foo = {\n"
+            '  version = "^1",\n'
+            '  extras = ["a"],\n'
+            "}\n"
+            'bar = "1.0.0"\n'
+        )
+        assert deps == [("foo", "^1", 2), ("bar", "1.0.0", 6)]
+
+    def test_poetry_combined_constraints_flagged(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        for v in ("1.0.0 || ^2.0", "1.0.0,<3", "1.0.0 <3", "1.0.0|2.0.0"):
+            assert _check_poetry_version("foo", v)[0], v
+        assert not _check_poetry_version("foo", "1.0.0")[0]
+
+    def test_poetry_tables_not_read_as_pep508_arrays(self):
+        arrays = extract_dependency_arrays(
+            "[tool.poetry.dependencies.requests]\n"
+            'version = "2.31.0"\n'
+            'extras = ["security"]\n'
+            "[tool.poetry.dependencies]\n"
+            "foo = [\n"
+            '  { version = "1.0.0", python = "<3.8" },\n'
+            "]\n"
+        )
+        assert arrays == []
+
+    def test_unparsable_inline_project_table_reported(self):
+        """A dependency table this parser cannot read must not pass silently."""
+        arrays = extract_dependency_arrays('project = { dependencies = ["a>=1" }\n')
+        assert len(arrays) == 1
+        from pinstack.checkers.pyproject import _check_dep_specifier
+
+        assert _check_dep_specifier(arrays[0][0][0])[0]
+
+    def test_spaced_and_quoted_keys(self):
+        assert extract_dependency_arrays(
+            'project = { optional-dependencies . dev = ["a>=1"] }\n'
+        ) == [(["a>=1"], "dev")]
+        assert extract_dependency_arrays(
+            '"project" = { dependencies = ["b>=1"] }\n'
+        ) == [(["b>=1"], "dependencies")]
+        assert extract_dependency_arrays(
+            'project."optional-dependencies".dev = ["c>=1"]\n'
+        ) == [(["c>=1"], "dev")]
+
+    def test_multi_constraint_package_listed_once_when_stale(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                "[tool.poetry.dependencies]\n"
+                'foo = [{ version = "1.0.0", python = "<3.8" },'
+                ' { version = "1.0.0", python = ">=3.8" }]\n',
+            )
+            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "other"\n')
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "poetry.lock"}}, tmpdir
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "lock files are stale: missing 1 dependency (foo)"
+        ]
+
+    def test_dotted_source_fields_declare_a_dependency(self):
+        """Codex #14 follow-up: `foo.git` + `foo.rev` is `foo = { git, rev }`."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                "[tool.poetry.dependencies]\n"
+                'foo.git = "https://github.com/u/r.git"\n'
+                'foo.rev = "main"\n',
+            )
+            findings = PyprojectChecker().check({tmpdir: {"pyproject.toml"}}, tmpdir)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert "'foo' has no version constraint; use exact pinning" in [
+            f.message for f in findings
+        ]
+
+    def test_dotted_fields_merge_into_one_entry(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            'foo.version = "1.0.0"\n'
+            'foo.extras = ["a"]\n'
+            'bar = "2.0.0"\n'
+            'baz.path = "../baz"\n'
+        )
+        assert deps == [("foo", "1.0.0", 2), ("bar", "2.0.0", 4), ("baz", "", 5)]
+
+    def test_space_after_exact_operator(self):
+        """Codex #14 follow-up: Poetry accepts `== 1.2.3` as one exact constraint."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, '[tool.poetry.dependencies]\nfoo = "== 1.2.3"\n')
+            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "foo"\nversion = "1.2.3"\n')
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "poetry.lock"}}, tmpdir
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert findings == []
+
+    def test_space_after_range_operator_still_flagged(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        assert _check_poetry_version("foo", ">= 1.2.3")[0]
+        assert _check_poetry_version("foo", "== 1.2.3 || ^2")[0]

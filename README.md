@@ -113,7 +113,7 @@ silently defeats the pinning it was supposed to guarantee.
 | Checker | Files Examined | What Is Checked |
 |---|---|---|
 | `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
-| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale. A lock file that parses to no packages is reported. |
+| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins (no `==2.*` wildcards) in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`, whether written as sections, inline tables, or dotted keys, and including Poetry's table and multi-constraint forms; a companion lock file must exist and must not be stale. A lock file that parses to no packages is reported. |
 | `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | Every dependency is an exact `x.y.z` version, a local reference (`workspace:`, `file:`, `link:`, a path), an `npm:<name>@x.y.z` alias, or a git source fixed to a full 40-character commit SHA; anything else (`^`, `~`, `*`, `latest`, `1.x`, ranges, tarball URLs, branch or tag refs) is a finding. The same rules apply to `overrides`, `resolutions`, and `pnpm.overrides`. Declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
