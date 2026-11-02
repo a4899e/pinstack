@@ -19,6 +19,17 @@ EXCLUDED_DIRS = frozenset(
         ".terraform",
         "target",
         "vendor",
+        # Installed third-party packages and tool caches. These hold other
+        # projects' manifests (a package.json inside site-packages, say),
+        # often deep enough to trip --max-depth.
+        ".tox",
+        ".nox",
+        "site-packages",
+        "dist-packages",
+        "__pypackages__",
+        ".direnv",
+        "bower_components",
+        ".gradle",
     ]
 )
 
@@ -132,6 +143,34 @@ class Finding:
     )
 
 
+def describe_missing(names: list[str]) -> str:
+    """Return ``"missing N dependencies (a, b)"`` for the distinct ``names``."""
+    unique = sorted(set(names))
+    return "missing {} {} ({})".format(
+        len(unique),
+        "dependency" if len(unique) == 1 else "dependencies",
+        ", ".join(unique),
+    )
+
+
+def empty_lock_finding(checker: str, rel_lock_path: str) -> Finding:
+    """Report a lock file that parsed to no packages.
+
+    An empty or unrecognised lock must not satisfy a manifest's lock
+    requirement. Callers report this, then cross-reference the manifest
+    against the (empty) lock anyway so every dependency shows as missing.
+    """
+    return Finding(
+        checker=checker,
+        path=rel_lock_path,
+        line=0,
+        message="{} contains no packages (empty or unrecognised format)".format(
+            os.path.basename(rel_lock_path)
+        ),
+        integrity=True,
+    )
+
+
 class Checker:
     name: str = ""
     description: str = ""
@@ -204,24 +243,22 @@ def _matches_any_pattern(filename: str, patterns: set[str], rel_dir: str = "") -
 
 @dataclass
 class IndexResult:
-    """A file index plus what the traversal limits kept out of it.
+    """A file index plus the first file each traversal limit kept out of it.
 
-    ``index`` holds every matching file within the limits. Matching files
-    outside them are counted rather than silently dropped, so the caller can
-    report that the scan is incomplete.
+    ``index`` holds the matching files within the limits. A matching file
+    outside them is recorded rather than silently dropped, so the caller can
+    report that the scan is incomplete. Paths are relative to the scan root.
     """
 
     index: FileIndex
-    # Matching files not indexed because max_index_size was reached.
-    skipped_by_limit: int = 0
-    # Matching files not indexed because they sit at or below max_depth.
-    skipped_by_depth: int = 0
-    # Relative path of the first file counted in skipped_by_depth.
+    # First matching file not indexed because max_index_size was reached.
+    first_skipped_by_limit: str = ""
+    # First matching file not indexed because it sits at or below max_depth.
     first_skipped_by_depth: str = ""
 
     @property
     def complete(self) -> bool:
-        return not (self.skipped_by_limit or self.skipped_by_depth)
+        return not (self.first_skipped_by_limit or self.first_skipped_by_depth)
 
 
 def scan_index(
@@ -233,11 +270,17 @@ def scan_index(
 ) -> IndexResult:
     """Walk ``root`` once and index files matching ``patterns``.
 
-    Directories at depth ``max_depth`` and below (the root is depth 0) are
-    still walked, but only to count matching files, not to index them; the
-    same holds for matching files found after ``max_index_size`` is reached.
-    The walk visits the whole tree outside excluded directories, so the
-    counts are exact.
+    Limits:
+
+    1. Directories at depth ``max_depth`` and below (the root is depth 0) are
+       not indexed. They are walked until the first matching file is found
+       there, which is recorded; after that the walk prunes at ``max_depth``.
+       Proving no file was skipped needs the whole tree, but one is enough to
+       show the scan is incomplete.
+    2. A directory is indexed whole or not at all, so a checker never sees a
+       manifest without the lock file beside it. When a directory's matches
+       would take the index past ``max_index_size``, the first of them is
+       recorded and the walk stops.
     """
     excluded = (
         EXCLUDED_DIRS | extra_exclude_dirs if extra_exclude_dirs else EXCLUDED_DIRS
@@ -249,21 +292,27 @@ def scan_index(
         dirnames[:] = sorted(d for d in dirnames if d not in excluded)
         rel = os.path.relpath(dirpath, root)
         depth = 0 if rel == "." else rel.count(os.sep) + 1
-        matched: set[str] = set()
-        for fname in sorted(filenames):
-            if not _matches_any_pattern(fname, patterns, rel):
-                continue
-            if depth >= max_depth:
-                if not result.skipped_by_depth:
-                    result.first_skipped_by_depth = os.path.join(rel, fname)
-                result.skipped_by_depth += 1
-            elif count >= max_index_size:
-                result.skipped_by_limit += 1
-            else:
-                matched.add(fname)
-                count += 1
-        if matched:
-            result.index[dirpath] = matched
+        matched = sorted(f for f in filenames if _matches_any_pattern(f, patterns, rel))
+
+        if depth >= max_depth:
+            if result.first_skipped_by_depth:
+                dirnames.clear()
+            elif matched:
+                result.first_skipped_by_depth = os.path.normpath(
+                    os.path.join(rel, matched[0])
+                )
+                dirnames.clear()
+            continue
+
+        if not matched:
+            continue
+        if count + len(matched) > max_index_size:
+            result.first_skipped_by_limit = os.path.normpath(
+                os.path.join(rel, matched[0])
+            )
+            break
+        result.index[dirpath] = set(matched)
+        count += len(matched)
     return result
 
 
@@ -282,7 +331,7 @@ def build_index(
     """
     result = scan_index(root, patterns, max_depth, max_index_size, extra_exclude_dirs)
     for finding in index_findings(result, max_depth, max_index_size):
-        sys.stderr.write("pinstack: {}\n".format(finding.message))
+        sys.stderr.write("pinstack: {}: {}\n".format(finding.path, finding.message))
     return result.index
 
 
@@ -292,40 +341,33 @@ def index_findings(
     """Report each traversal limit that kept matching files out of the index.
 
     A gate that scanned only part of the tree must not pass, so these are
-    findings rather than warnings.
+    findings rather than warnings. Each is reported against the first file
+    the limit skipped, so it has a real location in text and SARIF output.
     """
     findings: list[Finding] = []
-    if result.skipped_by_limit:
+    if result.first_skipped_by_limit:
         findings.append(
             Finding(
                 checker="pinstack",
-                path="<index>",
+                path=result.first_skipped_by_limit,
                 line=0,
                 message=(
-                    "scan incomplete: index limit reached ({} files); {} more matching"
-                    " file{} not scanned. Use --max-files to increase the limit.".format(
-                        max_index_size,
-                        result.skipped_by_limit,
-                        " was" if result.skipped_by_limit == 1 else "s were",
-                    )
+                    "scan incomplete: index limit of {} files reached; this file and"
+                    " any after it were not scanned. Use --max-files to increase"
+                    " the limit.".format(max_index_size)
                 ),
             )
         )
-    if result.skipped_by_depth:
+    if result.first_skipped_by_depth:
         findings.append(
             Finding(
                 checker="pinstack",
-                path="<index>",
+                path=result.first_skipped_by_depth,
                 line=0,
                 message=(
-                    "scan incomplete: {} matching file{} below --max-depth {} {} not"
-                    " scanned (first: {}). Use --max-depth to increase the limit.".format(
-                        result.skipped_by_depth,
-                        "" if result.skipped_by_depth == 1 else "s",
-                        max_depth,
-                        "was" if result.skipped_by_depth == 1 else "were",
-                        result.first_skipped_by_depth.replace(os.sep, "/"),
-                    )
+                    "scan incomplete: this file is below --max-depth {} and was not"
+                    " scanned, nor were any others at that depth. Use --max-depth"
+                    " to increase the limit.".format(max_depth)
                 ),
             )
         )

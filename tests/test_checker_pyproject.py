@@ -51,7 +51,6 @@ def _check_subdir(subdir_name):
     try:
         shutil.copy(os.path.join(FIXTURES, subdir_name, "pyproject.toml"), tmpdir)
         _write_covering_lock(tmpdir)
-        _write_covering_lock(tmpdir)
         index = {tmpdir: {"pyproject.toml", "poetry.lock"}}
         return checker.check(index, tmpdir)
     finally:
@@ -1233,6 +1232,24 @@ class TestEmptyLockFailsClosed:
             assert [
                 (f.path, "contains no packages" in f.message) for f in findings
             ] == [("pdm.lock", True)]
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_missing_list_deduplicated(self):
+        """A dependency in two groups is listed once."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                '[project]\nname="x"\nversion="1"\ndependencies=["requests==2.31.0"]\n'
+                '[dependency-groups]\ndev=["requests==2.31.0"]\n',
+            )
+            open(os.path.join(tmpdir, "uv.lock"), "w").close()
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "uv.lock"}}, tmpdir
+            )
+            stale = [f.message for f in findings if "stale" in f.message]
+            assert stale == ["lock files are stale: missing 1 dependency (requests)"]
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

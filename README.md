@@ -113,7 +113,7 @@ silently defeats the pinning it was supposed to guarantee.
 | Checker | Files Examined | What Is Checked |
 |---|---|---|
 | `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
-| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale A lock file that parses to no packages is reported. |
+| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale. A lock file that parses to no packages is reported. |
 | `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | No `^`, `~`, or range specifiers in any dependency section; declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
@@ -146,8 +146,8 @@ pinstack [PATH] [OPTIONS]
 | `--exclude NAME,NAME` | Skip these checkers (comma-separated). Mutually exclusive with `--check`. |
 | `--format FORMAT` | Output format: `text` (default) or `sarif`. |
 | `--exit-zero` | Always exit 0, even when findings are present. Useful for advisory-only runs. |
-| `--max-depth N` | Maximum directory depth to check. Default: 4 (the scan root is depth 0, so files up to three directories down are checked). Deeper directories are still walked, and any dependency file found there is reported as a `pinstack` finding (`scan incomplete`), so the gate fails rather than passing on a partial scan. Increase for deep monorepos. |
-| `--max-files N` | Maximum number of dependency files to check. Default: 384. Reaching the limit is reported as a `pinstack` finding (`scan incomplete`) with the number of files left unchecked. Increase for large monorepos. |
+| `--max-depth N` | Maximum directory depth to check. Default: 4 (the scan root is depth 0, so files up to three directories down are checked). Deeper directories are still walked until a dependency file is found there; that file is reported as a `pinstack` finding (`scan incomplete`), so the gate fails rather than passing on a partial scan. Increase for deep monorepos. |
+| `--max-files N` | Maximum number of dependency files to check. Default: 384. Directories are indexed whole, so a manifest is never checked without its lock file. Reaching the limit is reported as a `pinstack` finding (`scan incomplete`) on the first file left unchecked. Increase for large monorepos. |
 | `--exclude-dir DIR,DIR` | Additional directory names to skip during traversal (comma-separated). |
 | `--list-checkers` | Print all available checkers and exit. |
 | `--version` | Print the pinstack version and exit. |

@@ -417,7 +417,7 @@ class TestIndexLimitFailsClosed:
                 _write(os.path.join(d, "a{}".format(i), "Dockerfile"), _GOOD_DOCKERFILE)
             rc, out, err = run_pinstack(d, "--max-files", "2")
             assert rc == 1
-            assert "scan incomplete: index limit reached (2 files); 1 more" in out
+            assert "a2/Dockerfile  scan incomplete: index limit of 2 files" in out
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
@@ -439,8 +439,7 @@ class TestMaxDepthLimitsScan:
             rc, out, err = run_pinstack(d, "--max-depth", "2")
             assert rc == 1
             assert "python:3.11" not in out
-            assert "scan incomplete" in out
-            assert "level1/level2/level3/Dockerfile" in out
+            assert "level1/level2/level3/Dockerfile  scan incomplete" in out
         finally:
             shutil.rmtree(d, ignore_errors=True)
 

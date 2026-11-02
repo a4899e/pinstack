@@ -327,12 +327,11 @@ class TestBuildIndex:
             shutil.rmtree(root, ignore_errors=True)
 
     def test_build_index_respects_max_index_size(self, capsys):
-        # Create 10 matching files, cap at 5
-        files = {"file{}.txt".format(i): "content\n" for i in range(10)}
+        # 10 directories with one matching file each, cap at 5
+        files = {"d{}".format(i): {"file.txt": "content\n"} for i in range(10)}
         root = _make_tmpdir_tree(files)
         try:
-            patterns = {"file{}.txt".format(i) for i in range(10)}
-            index = build_index(root, patterns, max_index_size=5)
+            index = build_index(root, {"file.txt"}, max_index_size=5)
             total = sum(len(fnames) for fnames in index.values())
             assert total == 5
             captured = capsys.readouterr()
@@ -659,41 +658,67 @@ class TestScanIndex:
 
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_files_below_max_depth_counted(self):
+    def test_file_below_max_depth_reported(self):
         root = _make_tmpdir_tree(
             {"a": {"b": {"requirements.txt": "x\n", "c": {"requirements.txt": "y\n"}}}}
         )
         try:
             result = scan_index(root, {"requirements.txt"}, max_depth=2)
             assert result.index == {}
-            assert result.skipped_by_depth == 2
             assert result.first_skipped_by_depth == os.path.join(
                 "a", "b", "requirements.txt"
             )
             (finding,) = index_findings(result, 2, 384)
             assert finding.checker == "pinstack"
-            assert finding.path == "<index>"
-            assert (
-                "2 matching files below --max-depth 2 were not scanned"
-                in finding.message
-            )
-            assert "first: a/b/requirements.txt" in finding.message
+            assert finding.path == os.path.join("a", "b", "requirements.txt")
+            assert "below --max-depth 2 and was not scanned" in finding.message
         finally:
             import shutil
 
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_files_over_limit_counted(self):
-        files = {"file{}.txt".format(i): "x\n" for i in range(10)}
+    def test_deep_walk_continues_until_first_match(self):
+        """Non-matching deep directories don't end the search for a skipped file."""
+        root = _make_tmpdir_tree(
+            {"a": {"b": {"README": "x\n", "c": {"d": {"requirements.txt": "y\n"}}}}}
+        )
+        try:
+            result = scan_index(root, {"requirements.txt"}, max_depth=2)
+            assert result.first_skipped_by_depth == os.path.join(
+                "a", "b", "c", "d", "requirements.txt"
+            )
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_index_limit_reported(self):
+        files = {"d{}".format(i): {"file.txt": "x\n"} for i in range(10)}
         root = _make_tmpdir_tree(files)
         try:
-            result = scan_index(root, set(files), max_index_size=5)
+            result = scan_index(root, {"file.txt"}, max_index_size=5)
             assert sum(len(v) for v in result.index.values()) == 5
-            assert result.skipped_by_limit == 5
+            assert result.first_skipped_by_limit == os.path.join("d5", "file.txt")
             (finding,) = index_findings(result, 4, 5)
-            assert "index limit reached (5 files); 5 more matching files" in (
-                finding.message
-            )
+            assert finding.path == os.path.join("d5", "file.txt")
+            assert "index limit of 5 files reached" in finding.message
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_directory_indexed_whole_or_not_at_all(self):
+        """A manifest is never indexed without the lock file beside it."""
+        root = _make_tmpdir_tree(
+            {
+                "a": {"package.json": "{}"},
+                "b": {"package.json": "{}", "yarn.lock": ""},
+            }
+        )
+        try:
+            result = scan_index(root, {"package.json", "yarn.lock"}, max_index_size=2)
+            assert list(result.index) == [os.path.join(root, "a")]
+            assert result.first_skipped_by_limit == os.path.join("b", "package.json")
         finally:
             import shutil
 
@@ -706,6 +731,26 @@ class TestScanIndex:
         try:
             result = scan_index(root, {"requirements.txt"}, max_depth=1)
             assert result.complete
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_installed_package_dirs_excluded(self):
+        """Third-party manifests in tool caches and site-packages are not the project's."""
+        root = _make_tmpdir_tree(
+            {
+                ".tox": {"py": {"lib": {"x": {"package.json": "{}"}}}},
+                "lib": {
+                    "site-packages": {"pkg": {"package.json": "{}"}},
+                    "dist-packages": {"pkg": {"package.json": "{}"}},
+                },
+            }
+        )
+        try:
+            result = scan_index(root, {"package.json"}, max_depth=2)
+            assert result.complete
+            assert result.index == {}
         finally:
             import shutil
 

@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    describe_missing,
+    empty_lock_finding,
+)
 
 # Version prefixes that indicate a non-exact (unpinned) dependency.
 _UNPINNED_PREFIXES = ("^", "~", ">=", "<=", ">", "<")
@@ -22,6 +29,8 @@ _DEP_SECTIONS = (
     "peerDependencies",
     "optionalDependencies",
 )
+
+_PNPM_V5_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+")
 
 # Lock files that provide integrity verification for package.json
 _LOCK_FILES = frozenset(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
@@ -92,13 +101,15 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
                     names.add(entry)
     elif lock_filename == "pnpm-lock.yaml":
         # Entries under "packages:" are keyed by name and version:
-        #   v5:      /express/4.18.2:
+        #   v5:      /express/4.18.2:   /react-dom/18.2.0_react@18.2.0:
         #   v6-v8:   /express@4.18.2:   /@scope/pkg@1.0.0(peer@1.0.0):
         #   v9:      express@4.18.2:    '@scope/pkg@1.0.0':
         in_packages = False
         for line in content.splitlines():
             stripped = line.strip()
-            if not line or line[0] not in (" ", "\t"):
+            if not stripped:
+                continue  # blank lines separate entries
+            if line[0] not in (" ", "\t"):
                 in_packages = stripped == "packages:"
                 continue
             if not in_packages or not stripped.endswith(":"):
@@ -106,16 +117,15 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
             # Package keys are the least-indented lines in the section.
             if len(line) - len(line.lstrip()) != 2:
                 continue
-            entry = stripped[:-1].strip("'\"").lstrip("/")
-            entry = entry.split("(", 1)[0]
+            entry = stripped[:-1].strip("'\"").lstrip("/").split("(", 1)[0]
+            # v5 "name/version[_peer@x]": the last segment is the version.
+            name, sep, last = entry.rpartition("/")
+            if sep and _PNPM_V5_VERSION_RE.match(last):
+                names.add(name)
+                continue
             at_pos = entry.rfind("@")
             if at_pos > 0:
                 names.add(entry[:at_pos])
-                continue
-            # v5 "name/version" form
-            name, sep, version = entry.rpartition("/")
-            if sep and version[:1].isdigit():
-                names.add(name)
             elif entry:
                 names.add(entry)
 
@@ -189,25 +199,23 @@ class PackageJsonChecker(Checker):
                     )
                 )
             elif has_deps and found_lock_files:
-                # Cross-reference: check that every manifest dep appears in the lock file
-                lock_filename = sorted(found_lock_files)[0]
-                lock_names = _extract_js_lock_names(full_path, lock_filename)
-                if not lock_names:
-                    # An unreadable lock must not satisfy the lock requirement;
-                    # report it, then report every dependency as missing.
-                    findings.append(
-                        Finding(
-                            checker=self.name,
-                            path=os.path.relpath(
-                                os.path.join(dir_path, lock_filename), root
-                            ),
-                            line=0,
-                            message="{} contains no packages (empty or unrecognised format)".format(
-                                lock_filename
-                            ),
-                            integrity=True,
+                # Cross-reference: every manifest dep must appear in some lock
+                # file. Each lock that parses to no packages is reported, and
+                # the cross-reference still runs against the rest.
+                lock_filenames = sorted(found_lock_files)
+                lock_names: set[str] = set()
+                for lock_filename in lock_filenames:
+                    names = _extract_js_lock_names(full_path, lock_filename)
+                    if not names:
+                        findings.append(
+                            empty_lock_finding(
+                                self.name,
+                                os.path.relpath(
+                                    os.path.join(dir_path, lock_filename), root
+                                ),
+                            )
                         )
-                    )
+                    lock_names |= names
                 missing: list[str] = []
                 for section in _DEP_SECTIONS:
                     deps = data.get(section)
@@ -222,12 +230,10 @@ class PackageJsonChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            message="{} is stale: missing {} ({})".format(
-                                lock_filename,
-                                "{} dependency".format(len(missing))
-                                if len(missing) == 1
-                                else "{} dependencies".format(len(missing)),
-                                ", ".join(sorted(missing)),
+                            message="{} {} stale: {}".format(
+                                ", ".join(lock_filenames),
+                                "is" if len(lock_filenames) == 1 else "are",
+                                describe_missing(missing),
                             ),
                             integrity=True,
                         )

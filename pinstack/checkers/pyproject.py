@@ -6,7 +6,14 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    describe_missing,
+    empty_lock_finding,
+    validate_url_fragment_hashes,
+)
 
 # Sections we care about (PEP 621 + PEP 735)
 _SECTION_PROJECT = "project"
@@ -569,16 +576,9 @@ class PyprojectChecker(Checker):
             if has_deps:
                 for lock_file in empty_lock_files:
                     findings.append(
-                        Finding(
-                            checker=self.name,
-                            path=os.path.relpath(
-                                os.path.join(dir_path, lock_file), root
-                            ),
-                            line=0,
-                            message="{} contains no packages (empty or unrecognised format)".format(
-                                lock_file
-                            ),
-                            integrity=True,
+                        empty_lock_finding(
+                            self.name,
+                            os.path.relpath(os.path.join(dir_path, lock_file), root),
                         )
                     )
 
@@ -610,11 +610,8 @@ class PyprojectChecker(Checker):
                             checker=self.name,
                             path=rel_path,
                             line=0,
-                            message="lock files are stale: missing {} ({})".format(
-                                "{} dependency".format(len(missing))
-                                if len(missing) == 1
-                                else "{} dependencies".format(len(missing)),
-                                ", ".join(sorted(missing)),
+                            message="lock files are stale: {}".format(
+                                describe_missing(missing)
                             ),
                             integrity=True,
                         )
