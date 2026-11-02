@@ -28,34 +28,115 @@ from typing import Optional
 from pinstack.core import Checker, Finding, FileIndex
 
 _LOCK_FILE = ".terraform.lock.hcl"
-_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 _ROOT_SIGNAL_RE = re.compile(
     r'^[ \t]*(?:required_providers|provider[ \t]+"[^"]+"|backend[ \t]+"[^"]+"|cloud)'
     r"[ \t]*\{",
     re.M,
 )
+_MODULE_BLOCK_RE = re.compile(r'^[ \t]*module[ \t]+"[^"]*"[ \t]*\{', re.M)
 _LOCAL_SOURCE_RE = re.compile(r'^[ \t]*source[ \t]*=[ \t]*"(\.\.?/[^"]*)"', re.M)
+_HEREDOC_START_RE = re.compile(r"<<-?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\n")
+
+
+def _strip_comments(content: str) -> str:
+    """Replace HCL comments and heredoc bodies with spaces.
+
+    Quoted strings and newlines are kept. Comment markers inside a string or
+    heredoc are content, and ``/*`` inside
+    a ``#`` comment does not open a block comment, so this scans the text
+    once rather than applying one regex per comment form. Newlines are kept
+    so offsets map to the same line numbers.
+    """
+    out: list[str] = []
+    i, n = 0, len(content)
+    while i < n:
+        ch = content[i]
+        two = content[i : i + 2]
+        if ch == "#" or two == "//":
+            end = content.find("\n", i)
+            end = n if end == -1 else end
+            out.append(" " * (end - i))
+            i = end
+        elif two == "/*":
+            end = content.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            out.append("".join(c if c == "\n" else " " for c in content[i:end]))
+            i = end
+        elif ch == '"':
+            # A quoted string, ending at the next unescaped quote on the line.
+            j = i + 1
+            while j < n and content[j] not in ('"', "\n"):
+                j += 2 if content[j] == "\\" else 1
+            end = min(j + 1, n)
+            out.append(content[i:end])
+            i = end
+        elif two == "<<":
+            m = _HEREDOC_START_RE.match(content, i)
+            if not m:
+                out.append(two)
+                i += 2
+                continue
+            # The body runs to a line holding only the delimiter. It is
+            # string content, so it is blanked like a comment.
+            end_re = re.compile(r"^[ \t]*" + re.escape(m.group(1)) + r"[ \t]*$", re.M)
+            close = end_re.search(content, m.end())
+            end = n if close is None else close.end()
+            out.append(content[i : m.end()])
+            out.append("".join(c if c == "\n" else " " for c in content[m.end() : end]))
+            i = end
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
 def _read_tf(path: str) -> str:
-    """Return a .tf file's text with comments removed, or "" if unreadable."""
+    """Return a .tf file's text with comments and heredocs blanked, or ""."""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
+            return _strip_comments(fh.read())
     except OSError:
         return ""
-    # Blank out block comments line-for-line so line numbers still hold.
-    content = _BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), content)
-    lines = []
-    for line in content.split("\n"):
-        stripped = line.lstrip()
-        lines.append("" if stripped.startswith(("#", "//")) else line)
-    return "\n".join(lines)
+
+
+def _block_body(content: str, open_brace: int) -> str:
+    """Return the text of the block whose ``{`` is at ``open_brace``.
+
+    ``content`` must already have comments stripped. Braces inside quoted
+    strings are skipped.
+    """
+    depth = 0
+    i, n = open_brace, len(content)
+    while i < n:
+        ch = content[i]
+        if ch == '"':
+            i += 1
+            while i < n and content[i] not in ('"', "\n"):
+                i += 2 if content[i] == "\\" else 1
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return content[open_brace : i + 1]
+        i += 1
+    return content[open_brace:]
+
+
+def _local_module_sources(content: str) -> list[str]:
+    """Return the local ``source`` paths of every ``module`` block."""
+    sources: list[str] = []
+    for m in _MODULE_BLOCK_RE.finditer(content):
+        body = _block_body(content, m.end() - 1)
+        sources.extend(_LOCAL_SOURCE_RE.findall(body))
+    return sources
 
 
 class TerraformChecker(Checker):
     name = "terraform"
-    description = "Checks .terraform.lock.hcl for provider blocks missing h1: hashes"
+    description = (
+        "Checks Terraform root modules have a .terraform.lock.hcl with h1: hashes"
+    )
     patterns: list[str] = [_LOCK_FILE, "*.tf"]
 
     def _check_root_modules(self, index: FileIndex, root: str) -> list[Finding]:
@@ -73,7 +154,7 @@ class TerraformChecker(Checker):
                 if m and dir_path not in signals:
                     lineno = content.count("\n", 0, m.start()) + 1
                     signals[dir_path] = (fname, lineno)
-                for source in _LOCAL_SOURCE_RE.findall(content):
+                for source in _local_module_sources(content):
                     called.add(os.path.normpath(os.path.join(dir_path, source)))
 
         # 2. A root module without a lock file is a finding.

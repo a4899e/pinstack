@@ -120,3 +120,31 @@ class TestTerraformMissingLock:
 
     def test_tf_pattern_indexed(self):
         assert "*.tf" in TerraformChecker.patterns
+
+
+class TestTerraformParsing:
+    def test_comment_markers_do_not_hide_blocks(self):
+        """`/*` inside a `#` comment opens nothing; a resource `source = "./"` calls no module."""
+        findings = _scan("comment_tricks")
+        assert [(f.path, f.line) for f in findings] == [("main.tf", 3)]
+
+    def test_heredoc_body_is_not_configuration(self):
+        from pinstack.checkers.terraform import _ROOT_SIGNAL_RE, _strip_comments
+
+        text = 'x = <<EOT\nprovider "fake" {\nEOT\n'
+        assert not _ROOT_SIGNAL_RE.search(_strip_comments(text))
+
+    def test_strings_keep_comment_markers(self):
+        from pinstack.checkers.terraform import _strip_comments
+
+        text = 'a = "x # y /* z"\n'
+        assert _strip_comments(text) == text
+
+    def test_only_module_block_sources_count(self):
+        from pinstack.checkers.terraform import _local_module_sources, _strip_comments
+
+        text = _strip_comments(
+            'resource "r" "x" {\n  source = "./f"\n}\n'
+            'module "m" {\n  source = "../m" // note\n  x = { a = "}" }\n}\n'
+        )
+        assert _local_module_sources(text) == ["../m"]
