@@ -132,6 +132,54 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
     return names
 
 
+_YARN_LOCK_MARKERS = re.compile(r"^(?:# yarn lockfile v1|__metadata:)", re.M)
+_PNPM_LOCK_MARKER = re.compile(r"^lockfileVersion:", re.M)
+# Specs resolved from the working tree; lock files need not list them as
+# registry packages (pnpm records them only under importers).
+_LOCAL_SPEC_PREFIXES = ("file:", "link:", "workspace:", "portal:", ".", "/", "~/")
+
+
+def _js_lock_recognised(full_path: str, lock_filename: str) -> bool:
+    """Return True if a lock file is in a format its package manager writes.
+
+    A recognised lock may legitimately list no packages (only local links,
+    or only optional peers that were not installed). An empty or
+    unrecognised file may not.
+    """
+    lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
+    try:
+        with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return False
+    if lock_filename == "package-lock.json":
+        try:
+            data = json.loads(content)
+        except (ValueError, TypeError):
+            return False
+        return isinstance(data, dict) and isinstance(data.get("lockfileVersion"), int)
+    if lock_filename == "yarn.lock":
+        return bool(_YARN_LOCK_MARKERS.search(content))
+    return bool(_PNPM_LOCK_MARKER.search(content))
+
+
+def _needs_lock_entry(data: dict, section: str, pkg: str, spec: object) -> bool:
+    """Return True if a declared dependency must appear in the lock file.
+
+    Local references are resolved from the tree, and an optional peer
+    (``peerDependenciesMeta.<pkg>.optional``) is not installed, so neither
+    has to be listed as a locked package.
+    """
+    if isinstance(spec, str) and spec.strip().startswith(_LOCAL_SPEC_PREFIXES):
+        return False
+    if section == "peerDependencies":
+        meta = data.get("peerDependenciesMeta")
+        entry = meta.get(pkg) if isinstance(meta, dict) else None
+        if isinstance(entry, dict) and entry.get("optional") is True:
+            return False
+    return True
+
+
 class PackageJsonChecker(Checker):
     name = "package_json"
     description = (
@@ -200,13 +248,14 @@ class PackageJsonChecker(Checker):
                 )
             elif has_deps and found_lock_files:
                 # Cross-reference: every manifest dep must appear in some lock
-                # file. Each lock that parses to no packages is reported, and
-                # the cross-reference still runs against the rest.
+                # file. Each lock that yields no packages and is not in a
+                # recognised format is reported, and the cross-reference still
+                # runs against the rest.
                 lock_filenames = sorted(found_lock_files)
                 lock_names: set[str] = set()
                 for lock_filename in lock_filenames:
                     names = _extract_js_lock_names(full_path, lock_filename)
-                    if not names:
+                    if not names and not _js_lock_recognised(full_path, lock_filename):
                         findings.append(
                             empty_lock_finding(
                                 self.name,
@@ -222,7 +271,9 @@ class PackageJsonChecker(Checker):
                     if not deps or not isinstance(deps, dict):
                         continue
                     for pkg in sorted(deps.keys()):
-                        if pkg not in lock_names:
+                        if pkg in lock_names:
+                            continue
+                        if _needs_lock_entry(data, section, pkg, deps[pkg]):
                             missing.append(pkg)
                 if missing:
                     findings.append(
