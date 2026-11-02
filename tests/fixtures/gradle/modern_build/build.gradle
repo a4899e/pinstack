@@ -1,0 +1,8 @@
+ext.v = "+"
+dependencies {
+  implementation "org.foo:lib:$v"
+  implementation "org.foo:lib2:1.0-SNAPSHOT"
+  implementation platform("org.foo:bom:1.+")
+  implementation(group = "org.foo", name = "lib3", version = "1.+")
+}
+apply from: "deps.gradle"

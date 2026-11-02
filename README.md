@@ -127,7 +127,7 @@ silently defeats the pinning it was supposed to guarantee.
 | `terraform` | `.terraform.lock.hcl`, `*.tf` | `h1:` hashes present per provider; a root module (a directory whose `.tf` files declare `required_providers` or configure a `provider`, `backend`, or `cloud`, and that no other scanned module calls via a local `source`) needs a `.terraform.lock.hcl` that locks every provider it requires |
 | `helm` | `Chart.yaml`, `Chart.lock` | Lock file exists when `Chart.yaml` has dependencies; `digest:` present |
 | `maven` | `pom.xml` | Exact `<version>` required -- no ranges, `LATEST`/`RELEASE`, `SNAPSHOT`, unresolvable `${property}` references, or missing versions |
-| `gradle` | `build.gradle`, `build.gradle.kts`, `gradle.lockfile` | Exact versions -- no dynamic (`+`) or range versions; `gradle.lockfile` must exist and must not be stale |
+| `gradle` | `*.gradle`, `*.gradle.kts`, `gradle.lockfile`, `buildscript-gradle.lockfile`, `*.versions.toml` | Exact versions in every build script (including ones pulled in with `apply from:`) and in version catalogs (`libs.versions.toml`) -- no dynamic (`+`, `latest.*`), range, `SNAPSHOT`, or unresolvable `$variable` versions, including inside `platform(...)`; `build.gradle(.kts)` needs a `gradle.lockfile` that is not stale (buildscript `classpath` entries need a `buildscript-gradle.lockfile` and are cross-referenced against it). `libs.<alias>` references are checked through the catalog, not cross-referenced against the lockfile |
 
 Run `pinstack --list-checkers` to print this list from the installed version.
 
