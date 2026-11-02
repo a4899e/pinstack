@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import fnmatch
+import glob
 import os
 import re
+from dataclasses import dataclass, field
 from typing import Optional
 
 from pinstack.core import Checker, Finding, FileIndex
@@ -19,39 +20,190 @@ _DEP_SECTION_NAMES = frozenset(
 )
 
 
-def _parse_cargo_toml_deps(path: str) -> list[str]:
-    """Return list of dependency names from Cargo.toml."""
-    deps: list[str] = []
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return deps
+@dataclass
+class _Dependency:
+    key: str  # the name the manifest uses
+    package: Optional[str] = None  # `package = "..."` rename
+    inherits: bool = False  # `workspace = true`
+    path: Optional[str] = None  # `path = "..."`
 
-    in_dep_section = False
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+
+@dataclass
+class _Manifest:
+    """The parts of a Cargo.toml that decide what must be locked, and where."""
+
+    has_workspace: bool = False
+    members: list[str] = field(default_factory=list)
+    exclude: list[str] = field(default_factory=list)
+    # [dependencies], [dev-dependencies], [build-dependencies], target.*
+    dependencies: list[_Dependency] = field(default_factory=list)
+    # [workspace.dependencies], which members inherit with workspace = true
+    workspace_dependencies: dict[str, _Dependency] = field(default_factory=dict)
+
+
+_STRING_RE = re.compile(r"""\"((?:[^\"\\]|\\.)*)\"|'([^']*)'""")
+
+
+def _strip_toml_comment(line: str) -> str:
+    """Remove a ``#`` comment that is outside TOML strings."""
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+        i += 1
+    return line
+
+
+def _split_dotted(key: str) -> list[str]:
+    """Split a TOML key on dots outside quotes, unquoting each part."""
+    parts: list[str] = []
+    for m in re.finditer(r"""\s*(?:"([^"]*)"|'([^']*)'|([^."'\s]+))\s*(?:\.|$)""", key):
+        part = next((g for g in m.groups() if g is not None), None)
+        if part is not None:
+            parts.append(part)
+    return parts
+
+
+def _strings(value: str) -> list[str]:
+    """Return every TOML string literal (either quote form) in ``value``."""
+    return [double or single for double, single in _STRING_RE.findall(value)]
+
+
+def _inline_field(value: str, name: str) -> Optional[str]:
+    """Return the value of ``name = ...`` inside an inline table, if any."""
+    m = re.search(
+        r"\b" + name + r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|(true|false))""", value
+    )
+    if not m:
+        return None
+    return next(g for g in m.groups() if g is not None)
+
+
+def _apply_dependency_field(dep: _Dependency, name: str, value: str) -> None:
+    if name == "package":
+        dep.package = (_strings(value) or [None])[0]
+    elif name == "workspace":
+        dep.inherits = value.strip() == "true"
+    elif name == "path":
+        dep.path = (_strings(value) or [None])[0]
+
+
+def _parse_manifest(path: str) -> _Manifest:
+    """Read a Cargo.toml without a TOML library (pinstack has no dependencies).
+
+    Handles comments, quoted and dotted keys, single- and double-quoted
+    strings, multi-line arrays, inline tables, and dependency tables of
+    their own (``[dependencies.serde]``).
+    """
+    manifest = _Manifest()
+    content = _read_text(path)
+    if content is None:
+        return manifest
+
+    section: list[str] = []
+    table_dep: Optional[_Dependency] = None
+    pending_key: Optional[str] = None
+    pending_value = ""
+    for raw in content.splitlines():
+        line = _strip_toml_comment(raw).strip()
+        if pending_key is not None:
+            pending_value += " " + line
+            if pending_value.count("[") <= pending_value.count("]"):
+                line, pending_key, pending_value = (
+                    pending_key + " = " + pending_value,
+                    None,
+                    "",
+                )
+            else:
+                continue
+        if not line:
             continue
-        # Section header
+
+        # 1. Table headers.
         if line.startswith("["):
-            # Strip table-array brackets and inline-table notation
-            section = line.strip("[]").strip()
-            parts = [p.strip().strip("\"'") for p in section.split(".")]
-            # [dependencies], [workspace.dependencies], [target.x.dependencies]
-            in_dep_section = parts[-1] in _DEP_SECTION_NAMES
-            # [dependencies.serde]: a single dependency written as a table
-            if len(parts) >= 2 and parts[-2] in _DEP_SECTION_NAMES:
-                deps.append(parts[-1])
+            table_dep = None
+            section = _split_dotted(line.strip("[] "))
+            if section == ["workspace"]:
+                manifest.has_workspace = True
+            # [dependencies.serde] and [target.x.dependencies.serde]
+            if len(section) >= 2 and section[-2] in _DEP_SECTION_NAMES:
+                table_dep = _Dependency(key=section[-1])
+                if section[:-1] == ["workspace", "dependencies"]:
+                    manifest.workspace_dependencies[table_dep.key] = table_dep
+                else:
+                    manifest.dependencies.append(table_dep)
             continue
-        if not in_dep_section:
-            continue
-        # Dependency line: "name = ...", "name = { ... }" or "name.workspace = true"
-        m = re.match(r"^([A-Za-z0-9_\-]+)(?:\.[A-Za-z0-9_\-]+)*\s*=", line)
-        if m:
-            deps.append(m.group(1))
 
-    return deps
+        # 2. key = value; a multi-line array continues on later lines.
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        value = value.strip()
+        if value.startswith("[") and value.count("[") > value.count("]"):
+            pending_key, pending_value = key, value
+            continue
+        key_parts = _split_dotted(key)
+        if not key_parts:
+            continue
+
+        if table_dep is not None:
+            _apply_dependency_field(table_dep, key_parts[0], value)
+            continue
+        if section == ["workspace"]:
+            if key_parts == ["members"]:
+                manifest.members = _strings(value)
+            elif key_parts == ["exclude"]:
+                manifest.exclude = _strings(value)
+            continue
+        if not section or section[-1] not in _DEP_SECTION_NAMES:
+            continue
+
+        # 3. A dependency: name = "1", name = { ... }, or name.field = ...
+        dep = _Dependency(key=key_parts[0])
+        if len(key_parts) > 1:
+            _apply_dependency_field(dep, key_parts[1], value)
+        elif value.startswith("{"):
+            dep.package = _inline_field(value, "package")
+            dep.inherits = _inline_field(value, "workspace") == "true"
+            dep.path = _inline_field(value, "path")
+        if section == ["workspace", "dependencies"]:
+            manifest.workspace_dependencies[dep.key] = dep
+        else:
+            manifest.dependencies.append(dep)
+    return manifest
+
+
+def _package_names(
+    manifest: _Manifest, workspace: Optional[_Manifest] = None
+) -> list[str]:
+    """Return the package names a manifest depends on, as Cargo.lock records them.
+
+    A rename (``package = "serde"``) and an inherited workspace dependency
+    resolve to the real package name.
+    """
+    inherited = (workspace or manifest).workspace_dependencies
+    names: list[str] = []
+    for dep in manifest.dependencies:
+        source = dep
+        if dep.inherits and dep.key in inherited:
+            source = inherited[dep.key]
+        names.append(dep.package or source.package or dep.key)
+    return names
+
+
+def _parse_cargo_toml_deps(path: str) -> list[str]:
+    """Return the package names a Cargo.toml depends on."""
+    return _package_names(_parse_manifest(path))
 
 
 def _parse_cargo_lock_names(lines: list[str]) -> set[str]:
@@ -64,11 +216,6 @@ def _parse_cargo_lock_names(lines: list[str]) -> set[str]:
     return names
 
 
-_WORKSPACE_HEADER_RE = re.compile(r"^[ \t]*\[workspace\][ \t]*$", re.M)
-_TABLE_HEADER_RE = re.compile(r"^[ \t]*\[", re.M)
-_PATH_DEP_RE = re.compile(r"\bpath\s*=\s*\"([^\"]+)\"")
-
-
 def _read_text(path: str) -> Optional[str]:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -77,50 +224,49 @@ def _read_text(path: str) -> Optional[str]:
         return None
 
 
-def _workspace_array(content: str, key: str) -> list[str]:
-    """Return the strings of ``key = [...]`` in a Cargo.toml's [workspace] table."""
-    header = _WORKSPACE_HEADER_RE.search(content)
-    if not header:
-        return []
-    next_header = _TABLE_HEADER_RE.search(content, header.end())
-    table = content[header.end() : next_header.start() if next_header else None]
-    m = re.search(r"^\s*" + key + r"\s*=\s*\[(.*?)\]", table, re.M | re.S)
-    return re.findall(r"\"([^\"]*)\"", m.group(1)) if m else []
+def _is_within(path: str, directory: str) -> bool:
+    path, directory = os.path.normpath(path), os.path.normpath(directory)
+    return path == directory or path.startswith(directory + os.sep)
 
 
-def _glob_matches(rel_path: str, pattern: str) -> bool:
-    """Match a path against a Cargo member glob, where ``*`` stays within a segment."""
-    path_parts = rel_path.split("/")
-    pattern_parts = pattern.strip("/").split("/")
-    if len(path_parts) != len(pattern_parts):
-        return False
-    return all(fnmatch.fnmatchcase(p, q) for p, q in zip(path_parts, pattern_parts))
+def _workspace_member_dirs(ws_dir: str, workspace: _Manifest) -> set[str]:
+    """Return the member directories of the workspace rooted at ``ws_dir``.
 
-
-def _is_workspace_member(crate_dir: str, ws_dir: str, ws_content: str) -> bool:
-    """Return True if ``crate_dir`` belongs to the workspace rooted at ``ws_dir``.
-
-    A crate is a member when a ``members`` glob or a path dependency of the
-    root manifest names its directory, and no ``exclude`` entry covers it.
+    Follows Cargo: directories matched by a ``members`` glob, plus every
+    path dependency (of the root package or of any member, transitively)
+    that lies inside the workspace directory, less anything under an
+    ``exclude`` entry.
+    Source: https://doc.rust-lang.org/cargo/reference/workspaces.html
     """
-    rel = os.path.relpath(crate_dir, ws_dir).replace(os.sep, "/")
-    for excluded in _workspace_array(ws_content, "exclude"):
-        excluded = excluded.strip("/")
-        if rel == excluded or rel.startswith(excluded + "/"):
-            return False
-    for member in _workspace_array(ws_content, "members"):
-        if _glob_matches(rel, member):
-            return True
-    for dep_path in _PATH_DEP_RE.findall(ws_content):
-        if os.path.normpath(os.path.join(ws_dir, dep_path)) == os.path.normpath(
-            crate_dir
-        ):
-            return True
-    return False
+    excluded = [os.path.join(ws_dir, e) for e in workspace.exclude]
+
+    def eligible(directory: str) -> bool:
+        return (
+            _is_within(directory, ws_dir)
+            and not any(_is_within(directory, e) for e in excluded)
+            and os.path.isfile(os.path.join(directory, "Cargo.toml"))
+        )
+
+    queue: list[str] = []
+    for pattern in workspace.members:
+        queue.extend(glob.glob(os.path.join(ws_dir, pattern)))
+    queue.extend(os.path.join(ws_dir, d.path) for d in workspace.dependencies if d.path)
+
+    members: set[str] = set()
+    while queue:
+        directory = os.path.normpath(queue.pop())
+        if directory in members or not eligible(directory):
+            continue
+        members.add(directory)
+        manifest = _parse_manifest(os.path.join(directory, "Cargo.toml"))
+        queue.extend(
+            os.path.join(directory, d.path) for d in manifest.dependencies if d.path
+        )
+    return members
 
 
-def _workspace_root(crate_dir: str, root: str) -> Optional[str]:
-    """Return the workspace root directory that ``crate_dir`` is a member of.
+def _workspace_root(crate_dir: str, root: str) -> Optional[tuple[str, _Manifest]]:
+    """Return the workspace root that ``crate_dir`` is a member of, and its manifest.
 
     Cargo looks upward for the nearest Cargo.toml with a [workspace] table.
     The search stops at the scan root. Returns None for a standalone crate,
@@ -133,10 +279,14 @@ def _workspace_root(crate_dir: str, root: str) -> Optional[str]:
         if parent == current or os.path.commonpath([root, parent]) != root:
             return None
         current = parent
-        content = _read_text(os.path.join(current, "Cargo.toml"))
-        if content is not None and _WORKSPACE_HEADER_RE.search(content):
-            if _is_workspace_member(crate_dir, current, content):
-                return current
+        toml_path = os.path.join(current, "Cargo.toml")
+        if not os.path.isfile(toml_path):
+            continue
+        workspace = _parse_manifest(toml_path)
+        if workspace.has_workspace:
+            members = _workspace_member_dirs(current, workspace)
+            if os.path.normpath(os.path.abspath(crate_dir)) in members:
+                return current, workspace
             return None
     return None
 
@@ -158,16 +308,13 @@ class CargoChecker(Checker):
         """
         toml_path = os.path.join(dir_path, "Cargo.toml")
         rel_toml = os.path.relpath(toml_path, root)
-        deps = _parse_cargo_toml_deps(toml_path)
-        if not deps:
+        manifest = _parse_manifest(toml_path)
+        if not manifest.dependencies:
             return None
 
-        own = _read_text(toml_path) or ""
-        ws_dir = (
-            None
-            if _WORKSPACE_HEADER_RE.search(own)
-            else _workspace_root(dir_path, root)
-        )
+        found = None if manifest.has_workspace else _workspace_root(dir_path, root)
+        ws_dir = found[0] if found else None
+        deps = _package_names(manifest, found[1] if found else None)
         lock_path = os.path.join(ws_dir, "Cargo.lock") if ws_dir else None
         if lock_path is None or not os.path.isfile(lock_path):
             return Finding(

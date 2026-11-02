@@ -242,3 +242,78 @@ class TestCargoTomlDependencyForms:
             import shutil
 
             shutil.rmtree(d, ignore_errors=True)
+
+
+class TestCargoManifestSyntax:
+    """Codex review of #13: legal TOML must not read as 'no dependencies'."""
+
+    def test_commented_section_header(self):
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[package]\nname = "x"\n[dependencies] # registry crates\nserde = "1"\n'
+            }
+        )
+        assert [p for p, _ in findings] == ["Cargo.toml"]
+
+    def test_quoted_dependency_key(self):
+        findings = _scan_tree(
+            {"Cargo.toml": '[package]\nname = "x"\n[dependencies]\n"serde" = "1"\n'}
+        )
+        assert [p for p, _ in findings] == ["Cargo.toml"]
+
+    def test_commented_workspace_header_and_literal_strings(self):
+        findings = _scan_tree(
+            {
+                "Cargo.toml": "[workspace] # shared lock\nmembers = ['crates/a']\n",
+                "Cargo.lock": _LOCK_SERDE,
+                "crates/a/Cargo.toml": '[package]\nname = "a"\n[dependencies]\nserde = "1"\n',
+            }
+        )
+        assert findings == []
+
+    def test_member_path_dependency_is_a_member(self):
+        """Cargo adds path dependencies of members inside the workspace dir."""
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["crates/app"]\n',
+                "Cargo.lock": _LOCK_SERDE
+                + '\n[[package]]\nname = "app"\n\n[[package]]\nname = "helper"\n',
+                "crates/app/Cargo.toml": '[package]\nname = "app"\n[dependencies]\n'
+                'helper = { path = "../../shared/helper" }\n',
+                "shared/helper/Cargo.toml": '[package]\nname = "helper"\n[dependencies]\nserde = "1"\n',
+            }
+        )
+        assert findings == []
+
+    def test_renamed_dependency_uses_package_name(self):
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["m"]\n',
+                "Cargo.lock": _LOCK_SERDE,
+                "m/Cargo.toml": '[package]\nname = "m"\n[dependencies]\n'
+                'serde1 = { package = "serde", version = "1" }\n',
+            }
+        )
+        assert findings == []
+
+    def test_inherited_renamed_dependency(self):
+        findings = _scan_tree(
+            {
+                "Cargo.toml": '[workspace]\nmembers = ["m"]\n'
+                '[workspace.dependencies]\nserde1 = { package = "serde", version = "1" }\n',
+                "Cargo.lock": _LOCK_SERDE,
+                "m/Cargo.toml": '[package]\nname = "m"\n[dependencies]\nserde1.workspace = true\n',
+            }
+        )
+        assert findings == []
+
+    def test_multiline_members_array_with_comments(self):
+        findings = _scan_tree(
+            {
+                "Cargo.toml": "[workspace]\nmembers = [\n  \"a\",  # first\n  'b',\n]\n",
+                "Cargo.lock": _LOCK_SERDE,
+                "a/Cargo.toml": '[package]\nname = "a"\n[dependencies]\nserde = "1"\n',
+                "b/Cargo.toml": '[package]\nname = "b"\n[dependencies]\nserde = "1"\n',
+            }
+        )
+        assert findings == []

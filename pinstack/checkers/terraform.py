@@ -132,6 +132,74 @@ def _local_module_sources(content: str) -> list[str]:
     return sources
 
 
+_REQUIRED_PROVIDERS_RE = re.compile(r"^[ \t]*required_providers[ \t]*\{", re.M)
+_PROVIDER_ENTRY_RE = re.compile(r"^[ \t]*([A-Za-z0-9_-]+)[ \t]*=[ \t]*([{\"])", re.M)
+_SOURCE_RE = re.compile(r'\bsource[ \t]*=[ \t]*"([^"]+)"')
+_PROVIDER_BLOCK_RE = re.compile(r'^[ \t]*provider[ \t]+"([^"]+)"[ \t]*\{', re.M)
+_LOCK_PROVIDER_RE = re.compile(r'^[ \t]*provider[ \t]+"([^"]+)"', re.M)
+# Registries whose providers lock under the same namespace/type.
+_DEFAULT_REGISTRIES = ("registry.terraform.io", "registry.opentofu.org")
+
+
+def _provider_key(source: str) -> str:
+    """Normalise a provider source address for comparison.
+
+    ``aws``, ``hashicorp/aws`` and ``registry.terraform.io/hashicorp/aws``
+    are the same provider, and so is the OpenTofu registry's copy.
+    """
+    parts = source.strip().lower().split("/")
+    if len(parts) == 1:
+        parts = ["hashicorp"] + parts
+    if len(parts) == 3 and parts[0] in _DEFAULT_REGISTRIES:
+        parts = parts[1:]
+    return "/".join(parts)
+
+
+def _required_providers(content: str) -> set[str]:
+    """Return the provider keys a .tf file requires.
+
+    Entries in ``required_providers`` use their ``source`` (or, in the
+    legacy ``name = "constraint"`` form, ``hashicorp/<name>``). A
+    ``provider "<name>"`` block whose name is not declared there implies
+    ``hashicorp/<name>``. Built-in providers (``terraform.io/builtin/...``)
+    are never locked and are left out.
+    """
+    declared: dict[str, str] = {}
+    for m in _REQUIRED_PROVIDERS_RE.finditer(content):
+        body = _block_body(content, m.end() - 1)[1:]
+        pos = 0
+        # Entries are read at the top level of the block; a nested
+        # { source = ... } belongs to the entry before it.
+        while True:
+            entry = _PROVIDER_ENTRY_RE.search(body, pos)
+            if not entry:
+                break
+            name, opener = entry.group(1), entry.group(2)
+            source = name
+            pos = entry.end()
+            if opener == "{":
+                inner = _block_body(body, entry.end() - 1)
+                pos = entry.end() - 1 + len(inner)
+                src = _SOURCE_RE.search(inner)
+                if src:
+                    source = src.group(1)
+            declared[name] = _provider_key(source)
+    keys = set(declared.values())
+    for m in _PROVIDER_BLOCK_RE.finditer(content):
+        if m.group(1) not in declared:
+            keys.add(_provider_key(m.group(1)))
+    return {k for k in keys if not k.startswith("terraform.io/builtin/")}
+
+
+def _locked_providers(lock_path: str) -> set[str]:
+    try:
+        with open(lock_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return set()
+    return {_provider_key(m.group(1)) for m in _LOCK_PROVIDER_RE.finditer(content)}
+
+
 class TerraformChecker(Checker):
     name = "terraform"
     description = (
@@ -144,6 +212,7 @@ class TerraformChecker(Checker):
         # 1. Find each directory's first root-module signal and every local
         #    module it calls.
         signals: dict[str, tuple[str, int]] = {}  # dir -> (file, line)
+        required: dict[str, set[str]] = {}  # dir -> provider keys
         called: set[str] = set()
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
@@ -154,15 +223,42 @@ class TerraformChecker(Checker):
                 if m and dir_path not in signals:
                     lineno = content.count("\n", 0, m.start()) + 1
                     signals[dir_path] = (fname, lineno)
+                required.setdefault(dir_path, set()).update(
+                    _required_providers(content)
+                )
                 for source in _local_module_sources(content):
                     called.add(os.path.normpath(os.path.join(dir_path, source)))
 
-        # 2. A root module without a lock file is a finding.
+        # 2. A root module needs a lock file that covers every provider it
+        #    requires. A zero-byte or unrelated lock is not a locked resolution.
         findings: list[Finding] = []
         for dir_path, (fname, lineno) in sorted(signals.items()):
-            if _LOCK_FILE in index[dir_path]:
-                continue
             if os.path.normpath(dir_path) in called:
+                continue
+            if _LOCK_FILE in index[dir_path]:
+                lock_path = os.path.join(dir_path, _LOCK_FILE)
+                unlocked = sorted(
+                    required.get(dir_path, set()) - _locked_providers(lock_path)
+                )
+                if unlocked:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=os.path.relpath(lock_path, root),
+                            line=0,
+                            message=(
+                                "{} does not lock {} ({}); run 'terraform init'"
+                                " and commit the lock file".format(
+                                    _LOCK_FILE,
+                                    "1 required provider"
+                                    if len(unlocked) == 1
+                                    else "{} required providers".format(len(unlocked)),
+                                    ", ".join(unlocked),
+                                )
+                            ),
+                            integrity=True,
+                        )
+                    )
                 continue
             findings.append(
                 Finding(

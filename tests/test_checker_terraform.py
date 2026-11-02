@@ -148,3 +148,92 @@ class TestTerraformParsing:
             'module "m" {\n  source = "../m" // note\n  x = { a = "}" }\n}\n'
         )
         assert _local_module_sources(text) == ["../m"]
+
+
+def _scan_tree(tree):
+    # type: (dict) -> list
+    import shutil
+    import tempfile
+
+    from pinstack.core import build_index
+
+    d = tempfile.mkdtemp()
+    try:
+        for rel, content in tree.items():
+            path = os.path.join(d, *rel.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(content)
+        index = build_index(d, set(TerraformChecker.patterns))
+        return [(f.path, f.message) for f in TerraformChecker().check(index, d)]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_AWS_ROOT = (
+    "terraform {\n  required_providers {\n"
+    '    aws = { source = "hashicorp/aws", version = "~> 5.0" }\n'
+    "  }\n}\n"
+)
+_AWS_LOCK = (
+    'provider "registry.terraform.io/hashicorp/aws" {\n'
+    '  version = "5.31.0"\n'
+    '  hashes = [\n    "h1:abc=",\n  ]\n}\n'
+)
+
+
+class TestTerraformLockCoverage:
+    """Codex review of #13: a lock file must actually lock the required providers."""
+
+    def test_zero_byte_lock_does_not_satisfy(self):
+        findings = _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": ""})
+        assert findings == [
+            (
+                ".terraform.lock.hcl",
+                ".terraform.lock.hcl does not lock 1 required provider"
+                " (hashicorp/aws); run 'terraform init' and commit the lock file",
+            )
+        ]
+
+    def test_covering_lock_accepted(self):
+        assert (
+            _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": _AWS_LOCK}) == []
+        )
+
+    def test_partial_lock_names_missing_provider(self):
+        tf = _AWS_ROOT + 'provider "random" {}\n'
+        findings = _scan_tree({"main.tf": tf, ".terraform.lock.hcl": _AWS_LOCK})
+        assert len(findings) == 1
+        assert "(hashicorp/random)" in findings[0][1]
+
+    def test_opentofu_registry_lock_equivalent(self):
+        lock = _AWS_LOCK.replace("registry.terraform.io", "registry.opentofu.org")
+        assert _scan_tree({"main.tf": _AWS_ROOT, ".terraform.lock.hcl": lock}) == []
+
+    def test_local_name_and_legacy_constraint_forms(self):
+        from pinstack.checkers.terraform import _required_providers, _strip_comments
+
+        tf = _strip_comments(
+            "terraform {\n  required_providers {\n"
+            '    mycloud = {\n      source = "acme/cloud"\n    }\n'
+            '    null = "~> 3.0"\n'
+            "  }\n}\n"
+            'provider "mycloud" {}\n'
+            'provider "google" {}\n'
+            'data "terraform_remote_state" "x" {}\n'
+        )
+        assert _required_providers(tf) == {
+            "acme/cloud",
+            "hashicorp/null",
+            "hashicorp/google",
+        }
+
+    def test_builtin_provider_not_required(self):
+        from pinstack.checkers.terraform import _required_providers
+
+        tf = (
+            "terraform {\n  required_providers {\n"
+            '    terraform = { source = "terraform.io/builtin/terraform" }\n'
+            "  }\n}\n"
+        )
+        assert _required_providers(tf) == set()

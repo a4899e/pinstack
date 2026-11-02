@@ -124,7 +124,7 @@ silently defeats the pinning it was supposed to guarantee.
 | `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present; every `require` appears in `go.sum` |
 | `cargo` | `Cargo.lock`, `Cargo.toml` | `checksum` field on each registry `[[package]]`; every `Cargo.toml` dependency appears in `Cargo.lock`; a `Cargo.toml` with dependencies needs a `Cargo.lock` beside it or, for a workspace member, in the workspace root, where its dependencies must also appear |
 | `gemfile` | `Gemfile`, `Gemfile.lock` | Lock file exists alongside `Gemfile`; every declared gem appears in it |
-| `terraform` | `.terraform.lock.hcl`, `*.tf` | `h1:` hashes present per provider; a root module (a directory whose `.tf` files declare `required_providers` or configure a `provider`, `backend`, or `cloud`, and that no other scanned module calls via a local `source`) needs a `.terraform.lock.hcl` |
+| `terraform` | `.terraform.lock.hcl`, `*.tf` | `h1:` hashes present per provider; a root module (a directory whose `.tf` files declare `required_providers` or configure a `provider`, `backend`, or `cloud`, and that no other scanned module calls via a local `source`) needs a `.terraform.lock.hcl` that locks every provider it requires |
 | `helm` | `Chart.yaml`, `Chart.lock` | Lock file exists when `Chart.yaml` has dependencies; `digest:` present |
 | `maven` | `pom.xml` | Exact `<version>` required -- no ranges, `LATEST`/`RELEASE`, `SNAPSHOT`, unresolvable `${property}` references, or missing versions |
 | `gradle` | `build.gradle`, `build.gradle.kts`, `gradle.lockfile` | Exact versions -- no dynamic (`+`) or range versions; `gradle.lockfile` must exist and must not be stale |
