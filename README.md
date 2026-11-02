@@ -114,11 +114,11 @@ silently defeats the pinning it was supposed to guarantee.
 |---|---|---|
 | `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
 | `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale. A lock file that parses to no packages is reported. |
-| `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | No `^`, `~`, or range specifiers in any dependency section; declared packages must appear in the lock file |
+| `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | Every dependency is an exact `x.y.z` version, a local reference (`workspace:`, `file:`, `link:`, a path), an `npm:<name>@x.y.z` alias, or a git source fixed to a full 40-character commit SHA; anything else (`^`, `~`, `*`, `latest`, `1.x`, ranges, tarball URLs, branch or tag refs) is a finding. The same rules apply to `overrides`, `resolutions`, and `pnpm.overrides`. Declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
 | `pnpm_lock` | `pnpm-lock.yaml` | `integrity` hashes present |
-| `dockerfile` | `Dockerfile*` | `@sha256:` digest on every `FROM` |
+| `dockerfile` | `Dockerfile*`, `Containerfile*`, `*.dockerfile`, `*.Dockerfile` | `@sha256:` digest on every image the build pulls: the `# syntax=` frontend, `FROM`, `COPY`/`ADD --from`, and `RUN --mount=from=`, including under `ONBUILD`. A bare name such as `alpine` is an image unless declared as a stage with `AS`, and `$VAR` references are reported because `--build-arg` can override them |
 | `compose` | `docker-compose*.yml`, `docker-compose*.yaml`, `compose*.yml`, `compose*.yaml` | `@sha256:` digest on `image:` references |
 | `github_actions` | `*.yml` and `*.yaml` under `.github/workflows/` | 40-char commit SHA after `@` in `uses:` |
 | `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present; every `require` appears in `go.sum` |

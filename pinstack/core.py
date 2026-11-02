@@ -79,6 +79,15 @@ _HASH_ALGORITHMS = {
 
 _HEX_RE = __import__("re").compile(r"^[0-9a-fA-F]+$")
 
+# A full git commit SHA-1, lowercase as git prints it. Shorter prefixes and
+# other spellings can be shadowed by a branch or tag of the same name.
+_COMMIT_SHA_RE = __import__("re").compile(r"^[0-9a-f]{40}$")
+
+
+def is_commit_sha(ref: str) -> bool:
+    """Return True if ``ref`` is a full 40-character lowercase commit SHA."""
+    return bool(_COMMIT_SHA_RE.match(ref))
+
 
 def validate_url_fragment_hashes(url: str) -> list[str]:
     """Validate hash key-value pairs in a URL fragment.
