@@ -25,7 +25,7 @@ from pinstack.core import Checker, Finding, FileIndex, is_commit_sha
 # looser (e.g. "1.2.3-..") is not a version to npm and resolves as a dist-tag.
 _IDENTIFIERS = r"[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*"
 _EXACT_SEMVER_RE = re.compile(
-    r"^=?v?[0-9]+\.[0-9]+\.[0-9]+(?:-{0})?(?:\+{0})?$".format(_IDENTIFIERS)
+    r"^=?v?(?P<core>[0-9]+\.[0-9]+\.[0-9]+)(?:-{0})?(?:\+{0})?$".format(_IDENTIFIERS)
 )
 
 # Local references, resolved from the working tree at install time.
@@ -63,8 +63,6 @@ _HOSTED_GIT_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org)"
     r"/[\w.-]+/[\w.-]+/?(?:#.*)?$"
 )
-# Fragment parameters that do not select a ref (yarn's "&workspace=").
-_NEUTRAL_FRAGMENT_PARAMS = ("workspace=",)
 
 # Remote tarballs carry no integrity field in package.json.
 _URL_PREFIXES = ("http://", "https://")
@@ -112,27 +110,35 @@ def _is_git_source(version: str) -> bool:
 
 
 def _git_fragment_pins_commit(fragment: str) -> bool:
-    """Return True if a git spec's ``#fragment`` selects one full commit SHA.
+    """Return True if a git spec's ``#fragment`` is one full commit SHA.
 
-    Accepts ``<sha>`` (npm, yarn), ``commit=<sha>`` (yarn), an optional
-    ``::path:...`` suffix (npm) and ``&workspace=...`` (yarn). A fragment
-    that also names a branch, tag or semver range is rejected.
+    An optional ``::path:...`` suffix is allowed: ``:`` cannot appear in a
+    git ref name, so the part before it can only resolve as a commit. Other
+    fragment syntaxes are rejected because their meaning depends on the
+    package manager. Yarn reads ``#commit=<sha>`` as a commit, but npm
+    passes it to git as a ref name, and ``=`` and ``&`` are legal in branch
+    names, so a branch called ``commit=<sha>`` could move.
     """
-    fragment = fragment.split("::", 1)[0]
-    pinned = False
-    for param in fragment.split("&"):
-        if param.startswith("commit="):
-            param = param[len("commit=") :]
-        if is_commit_sha(param):
-            pinned = True
-        elif not param.startswith(_NEUTRAL_FRAGMENT_PARAMS):
-            return False
-    return pinned
+    return is_commit_sha(fragment.split("::", 1)[0])
+
+
+# node-semver rejects versions longer than this, or with a major, minor or
+# patch above Number.MAX_SAFE_INTEGER; npm then resolves the spec as a
+# dist-tag, which can move.
+_SEMVER_MAX_LENGTH = 256
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def _is_exact_semver(version: str) -> bool:
+    m = _EXACT_SEMVER_RE.match(version)
+    if not m or len(version) > _SEMVER_MAX_LENGTH:
+        return False
+    return all(int(part) <= _MAX_SAFE_INTEGER for part in m.group("core").split("."))
 
 
 def _registry_version_problem(version: str) -> str:
     """Return the reason a registry version spec is not exact, or ""."""
-    if _EXACT_SEMVER_RE.match(version):
+    if _is_exact_semver(version):
         return ""
     if version.startswith(_RANGE_PREFIXES) or any(
         op in version for op in _RANGE_OPERATORS

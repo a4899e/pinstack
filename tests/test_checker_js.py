@@ -154,6 +154,14 @@ class TestPackageJsonVersionAllowlist:
         for v in ("1.2.3-..", "1.2.3-", "1.2.3+", "1.2.3-a..b", "\u0661.\u0662.\u0663"):
             assert _classify(v) == (True, "not exact semver"), repr(v)
 
+    def test_versions_beyond_semver_limits_rejected(self):
+        """node-semver rejects these, so npm treats them as moveable dist-tags."""
+        assert _classify("9007199254740992.0.0") == (True, "not exact semver")
+        assert _classify("1.9007199254740992.0") == (True, "not exact semver")
+        assert _classify("npm:x@0.0.9007199254740992") == (True, "not exact semver")
+        assert _classify("1.0.0-" + "a" * 260) == (True, "not exact semver")
+        assert _classify("9007199254740991.0.0") == (False, "")
+
     def test_alias_without_version_flagged(self):
         assert _classify("npm:other") == (True, "not exact semver")
         assert _classify("npm:@scope/other") == (True, "not exact semver")
@@ -168,8 +176,6 @@ class TestPackageJsonVersionAllowlist:
             "https://github.com/u/r#" + self._SHA,
             "https://gitlab.com/u/r.git#" + self._SHA,
             "git+https://github.com/u/r.git#" + self._SHA + "::path:packages/x",
-            "github:u/r#commit=" + self._SHA,
-            "github:u/r#commit=" + self._SHA + "&workspace=x",
         ):
             assert _classify(v) == (False, ""), v
 
@@ -184,6 +190,8 @@ class TestPackageJsonVersionAllowlist:
             "git://github.com/u/r.git",
             "u/r#" + self._SHA.upper(),
             "github:u/r#branch=main&commit=" + self._SHA,
+            "github:u/r#commit=" + self._SHA,
+            "github:u/r#" + self._SHA + "&workspace=x",
             "github:u/r#" + self._SHA + "&tag=v1",
             "https://github.com/u/r",
         ):
