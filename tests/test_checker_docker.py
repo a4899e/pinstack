@@ -472,6 +472,27 @@ class TestDockerfileHeredocAndEscapeEdgeCases:
         assert findings[0].line == 2
         assert "heredoc <<EOF is never closed" in findings[0].message
 
+    def test_heredoc_delimiter_with_punctuation(self):
+        """Codex #10 follow-up: the delimiter is the whole shell word, `EOF.txt`."""
+        findings = _run_dockerfile(
+            "FROM scratch\nCOPY <<EOF.txt /file\nhello\nEOF.txt\n"
+        )
+        assert findings == []
+
+    def test_heredoc_with_file_descriptor(self):
+        """Codex #10 follow-up: `3<<EOF` opens a heredoc; its body is not instructions."""
+        findings = _run_dockerfile(
+            "FROM scratch\nRUN true 3<<EOF\nFROM alpine\nEOF\nFROM busybox\n"
+        )
+        assert [f.line for f in findings] == [5]
+
+    def test_partly_quoted_heredoc_delimiter(self):
+        """Quotes are removed from the delimiter: `<<E"O"F` is closed by `EOF`."""
+        findings = _run_dockerfile(
+            'FROM scratch\nRUN cat <<E"O"F\nFROM a\nEOF\nFROM alpine\n'
+        )
+        assert [f.line for f in findings] == [5]
+
     def test_escaped_trailing_backslash_ends_the_instruction(self):
         """A line ending in two backslashes ends in an escaped backslash, not a continuation."""
         findings = _run_dockerfile("FROM scratch\nRUN echo \\\\\nFROM alpine\n")

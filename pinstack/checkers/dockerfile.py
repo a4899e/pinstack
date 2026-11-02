@@ -29,8 +29,9 @@ The file is split into instructions the way BuildKit's parser does it:
    escape is removed and the next line is appended as-is, without a separator,
    so ``FROM alp\\`` + ``ine`` is ``FROM alpine``. Comment lines and blank lines
    inside a continuation are dropped.
-3. ``RUN``, ``COPY`` and ``ADD`` may open heredocs (``<<EOF``, ``<<-"EOF"``);
-   the body lines up to each delimiter are content, not instructions.
+3. ``RUN``, ``COPY`` and ``ADD`` may open heredocs (``<<EOF``, ``<<-"EOF"``,
+   ``3<<EOF.txt``); the body lines up to each delimiter are content, not
+   instructions.
 
 Source: https://docs.docker.com/reference/dockerfile/
 """
@@ -58,7 +59,10 @@ _ONBUILD_RE = re.compile(r"^ONBUILD\s+", re.IGNORECASE)
 # precede the instruction's arguments, so a ``--from=`` or ``--mount=`` inside a
 # RUN shell command or a COPY source path is not mistaken for one.
 _FLAGS_RE = re.compile(r"^(COPY|ADD|RUN)((?:\s+--\S+)*)", re.IGNORECASE)
-_HEREDOC_RE = re.compile(r"<<(-?)([\"']?)([A-Za-z_][A-Za-z0-9_]*)\2")
+# BuildKit's heredoc word: an optional file descriptor, ``<<`` or ``<<-``, then
+# a delimiter word with no further ``<``. The delimiter may be quoted in whole
+# or in part and may contain punctuation (``<<EOF.txt``, ``3<<"EOF"``).
+_HEREDOC_WORD_RE = re.compile(r"^\d*<<(-?)([^<]+)$")
 
 
 def _read_directives(lines: list[str]) -> dict[str, tuple[int, str]]:
@@ -77,13 +81,90 @@ def _read_directives(lines: list[str]) -> dict[str, tuple[int, str]]:
     return directives
 
 
+def _shell_words(text: str) -> list[str]:
+    """Split text into shell words, keeping quotes and escapes in each word.
+
+    Words are separated by unquoted, unescaped whitespace. This mirrors the
+    lexer BuildKit runs over an instruction to look for heredocs.
+    """
+    words: list[str] = []
+    current: list[str] = []
+    in_word = False
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            current.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < len(text):
+                current.append(text[i + 1])
+                i += 1
+            elif ch == quote:
+                quote = ""
+        elif ch.isspace():
+            if in_word:
+                words.append("".join(current))
+                current = []
+                in_word = False
+        else:
+            in_word = True
+            current.append(ch)
+            if ch in ("'", '"'):
+                quote = ch
+            elif ch == "\\" and i + 1 < len(text):
+                current.append(text[i + 1])
+                i += 1
+        i += 1
+    if in_word:
+        words.append("".join(current))
+    return words
+
+
+def _unquote_word(word: str) -> str:
+    """Return a shell word with its quotes and escapes removed.
+
+    Inside double quotes a backslash escapes only ``"``, ``\\``, ``$`` and a
+    backtick; inside single quotes nothing is escaped.
+    """
+    out: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(word):
+        ch = word[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            else:
+                out.append(ch)
+        elif quote == '"':
+            if ch == '"':
+                quote = ""
+            elif ch == "\\" and i + 1 < len(word) and word[i + 1] in '"\\$`':
+                out.append(word[i + 1])
+                i += 1
+            else:
+                out.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "\\" and i + 1 < len(word):
+            out.append(word[i + 1])
+            i += 1
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def _heredoc_delimiters(instruction: str) -> list[tuple[bool, str]]:
     """Return ``(strip_tabs, delimiter)`` for each heredoc an instruction opens.
 
     Mirrors BuildKit: only RUN, COPY and ADD take heredocs, never in their
-    JSON (exec) form, and a heredoc opener is a ``<<`` that starts a shell
-    word outside quotes. ``RUN echo '<<EOF'`` and ``RUN ["echo", "<<EOF"]``
-    pass ``<<EOF`` as a literal argument.
+    JSON (exec) form. The instruction is split into shell words, and a word
+    of the form ``[fd]<<[-]delimiter`` opens a heredoc. ``RUN echo '<<EOF'``
+    and ``RUN ["echo", "<<EOF"]`` pass ``<<EOF`` as a literal argument, and
+    ``cat<<EOF`` is a single word that BuildKit does not treat as an opener.
+    The delimiter is the word with its quotes removed, so ``<<"EOF.txt"``
+    is closed by a line reading ``EOF.txt``.
     """
     m = _FLAGS_RE.match(instruction)
     if not m:
@@ -92,22 +173,13 @@ def _heredoc_delimiters(instruction: str) -> list[tuple[bool, str]]:
     if args.startswith("["):
         return []
     delimiters: list[tuple[bool, str]] = []
-    quote = ""
-    i = 0
-    while i < len(args):
-        ch = args[i]
-        if quote:
-            if ch == quote:
-                quote = ""
-        elif ch in ("'", '"'):
-            quote = ch
-        elif ch == "<" and (i == 0 or args[i - 1].isspace()):
-            opener = _HEREDOC_RE.match(args, i)
-            if opener:
-                delimiters.append((bool(opener.group(1)), opener.group(3)))
-                i = opener.end()
-                continue
-        i += 1
+    for word in _shell_words(args):
+        opener = _HEREDOC_WORD_RE.match(word)
+        if not opener:
+            continue
+        delimiter = _unquote_word(opener.group(2))
+        if delimiter:
+            delimiters.append((bool(opener.group(1)), delimiter))
     return delimiters
 
 
