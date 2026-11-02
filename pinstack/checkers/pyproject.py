@@ -6,7 +6,13 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex, validate_url_fragment_hashes
+from pinstack.core import (
+    Checker,
+    Finding,
+    FileIndex,
+    validate_url_fragment_hashes,
+    is_commit_sha,
+)
 
 # Sections we care about (PEP 621 + PEP 735)
 _SECTION_PROJECT = "project"
@@ -372,7 +378,7 @@ def _check_dep_specifier(dep: str) -> tuple[bool, str]:
             at_pos = url_part.rfind("@")
             if at_pos >= 0:
                 ref = url_part[at_pos + 1 :]
-                if re.match(r"^[0-9a-f]{40}$", ref):
+                if is_commit_sha(ref):
                     return False, ""
             pkg_name = dep.split(" @ ", 1)[0].strip()
             return True, "'{}' uses a mutable git ref; pin to a full commit SHA".format(

@@ -6,13 +6,10 @@ import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, is_commit_sha
 
 # Matches lines containing uses: <ref>
 _USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
-
-# A 40-character lowercase hex SHA
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # Workflow files live under .github/workflows/ (any depth above that)
 _WORKFLOW_PATH_PARTS = (".github", "workflows")
@@ -96,7 +93,7 @@ class GitHubActionsChecker(Checker):
                         continue
 
                     action_part, pin = ref.rsplit("@", 1)
-                    if not _SHA_RE.match(pin):
+                    if not is_commit_sha(pin):
                         findings.append(
                             Finding(
                                 checker=self.name,
