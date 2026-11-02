@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -57,9 +57,10 @@ exclude = ["tests", "build", "dist", ".venv", "**/__pycache__"]
 testpaths = ["tests"]
 
 [tool.uv]
-# Build tools (bandit, pyright, etc.) require Python >=3.10; the package
-# itself still supports >=3.9 at runtime (dependencies = []).
-environments = ["python_version >= '3.10'"]
+# Build tools require Python >=3.11: filelock (via pip-audit's cachecontrol
+# cache) fixes its open advisories only in releases that need 3.11. The
+# package itself still supports >=3.9 at runtime (dependencies = []).
+environments = ["python_version >= '3.11'"]
 
 [dependency-groups]
 build = [
@@ -72,5 +73,5 @@ build = [
     "bandit==1.9.4",
     "pip-audit==2.10.1",
     "detect-secrets==1.5.0",
-    "setuptools==84.0.0",
+    "setuptools==84.2.1",
 ]

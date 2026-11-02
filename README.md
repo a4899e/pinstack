@@ -330,14 +330,15 @@ pinstack . --exclude-dir vendor,third_party,checkouts
 3. Add tests for any new checker or behaviour
 4. Open a pull request against `main`
 
-Development setup (requires Python 3.10+ and [uv](https://docs.astral.sh/uv/)):
+Development setup (requires Python 3.11+ and [uv](https://docs.astral.sh/uv/)):
 
 ```
 ./scripts/dev-setup.sh
 ```
 
-> **Note:** pinstack *runs* on Python 3.9+, but *development* requires 3.10+
-> because some build-chain tools (bandit) need it.
+> **Note:** pinstack *runs* on Python 3.9+, but *development* requires 3.11+
+> because some build-chain tools need it (filelock's security fixes require
+> 3.11).
 
 ### Running Tests
 
