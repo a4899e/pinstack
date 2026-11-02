@@ -28,12 +28,15 @@ an alias they cannot resolve as unverifiable.
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterator, Optional
 
 # A sequence item marker in a key path.
 ITEM = "-"
+# How checkers describe an alias whose anchor is not a scalar this reader saw.
+UNRESOLVED_ALIAS = "is a YAML alias pinstack could not resolve"
 
 
 @dataclass(frozen=True)
@@ -63,29 +66,61 @@ _PROPERTY_RE = re.compile(r"^(?:[&!][^\s,\[\]{}]*\s+)+")
 _ANCHOR_RE = re.compile(r"&([^\s,\[\]{}]+)")
 
 
-def _strip_comment(line: str) -> str:
-    """Remove a ``#`` comment that is outside quotes.
+def _quote_can_open(text: str, i: int) -> bool:
+    """Return True if a quote character at ``text[i]`` starts a quoted scalar.
 
-    A ``#`` starts a comment at the start of the line or after whitespace.
+    A quoted scalar starts where a node starts: at the beginning of the text,
+    or after whitespace or a flow indicator that follows a node boundary
+    (``key: 'v'``, ``- 'v'``, ``[a, 'b']``, ``{'k': v}``). An apostrophe
+    inside a plain scalar (``Don't``) is just a character.
+    """
+    if i == 0:
+        return True
+    if text[i - 1] not in " \t\r\n{[,":
+        return False
+    j = i - 1
+    while j >= 0 and text[j] in " \t\r\n":
+        j -= 1
+    return j < 0 or text[j] in "{[,:-?"
+
+
+def _outside_quotes(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(index, char)`` for every character outside quoted scalars.
+
+    This is the one place quoting is decided, so comment stripping, key
+    splitting and bracket counting always agree on where a string is.
     """
     quote = ""
-    i = 0
-    while i < len(line):
-        ch = line[i]
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
         if quote:
             if quote == '"' and ch == "\\":
                 i += 2
                 continue
             if ch == quote:
-                if quote == "'" and line[i + 1 : i + 2] == "'":
+                if quote == "'" and text[i + 1 : i + 2] == "'":
                     i += 2
                     continue
                 quote = ""
-        elif ch in ("'", '"') and (i == 0 or line[i - 1] in " \t:-[{,"):
+            i += 1
+            continue
+        if ch in ("'", '"') and _quote_can_open(text, i):
             quote = ch
-        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
-            return line[:i].rstrip()
+            i += 1
+            continue
+        yield i, ch
         i += 1
+
+
+def _strip_comment(line: str) -> str:
+    """Remove a ``#`` comment that is outside quotes.
+
+    A ``#`` starts a comment at the start of the line or after whitespace.
+    """
+    for i, ch in _outside_quotes(line):
+        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip()
     return line.rstrip()
 
 
@@ -117,49 +152,25 @@ def _split_key(text: str) -> Optional[tuple[str, str]]:
     A ``:`` ends a key when it is followed by whitespace or the end of text.
     Returns None when the text is not a mapping entry.
     """
-    quote = ""
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if quote:
-            if quote == '"' and ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = ""
-        elif ch in ("'", '"') and i == 0:
-            quote = ch
-        elif ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
+    if text[:1] in ("{", "["):
+        return None
+    for i, ch in _outside_quotes(text):
+        if ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
             key = text[:i].strip()
             if not key or key.startswith("?"):
                 return None
             return _unquote(key), text[i + 1 :].strip()
-        elif ch in "{[" and i == 0:
-            return None
-        i += 1
     return None
 
 
 def _bracket_balance(text: str) -> int:
     """Return how many ``{``/``[`` are left open in ``text``, outside quotes."""
     depth = 0
-    quote = ""
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if quote:
-            if quote == '"' and ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = ""
-        elif ch in ("'", '"'):
-            quote = ch
-        elif ch in "{[":
+    for _, ch in _outside_quotes(text):
+        if ch in "{[":
             depth += 1
         elif ch in "}]":
             depth -= 1
-        i += 1
     return depth
 
 
@@ -167,6 +178,7 @@ class _Reader:
     def __init__(self) -> None:
         self.out: list[Scalar] = []
         self.anchors: dict[str, str] = {}
+        self._newlines: list[int] = []  # offsets of "\n" in the flow text
 
     # -- values -----------------------------------------------------------
 
@@ -200,6 +212,7 @@ class _Reader:
         props = _PROPERTY_RE.match(text)
         if props:
             text = text[props.end() :]
+        self._newlines = [i for i, ch in enumerate(text) if ch == "\n"]
         self._flow_node(path, text, 0, line)
 
     def _flow_node(self, path: tuple[str, ...], text: str, pos: int, line: int) -> int:
@@ -210,7 +223,9 @@ class _Reader:
         opener = text[pos]
         if opener not in "{[":
             end = self._scalar_end(text, pos)
-            self.emit(path, text[pos:end], line + text.count("\n", 0, pos))
+            self.emit(
+                path, text[pos:end], line + bisect.bisect_left(self._newlines, pos)
+            )
             return end
         closer = "}" if opener == "{" else "]"
         pos += 1
@@ -226,6 +241,11 @@ class _Reader:
             if opener == "{":
                 key_end = self._key_end(text, pos)
                 if key_end is None:
+                    # A key with no value ({a, b: c}) is a null entry.
+                    end = self._scalar_end(text, pos)
+                    if end < len(text) and text[end] in ",}":
+                        pos = end
+                        continue
                     return len(text)
                 key = _unquote(text[pos:key_end])
                 pos = self._skip_space(text, key_end + 1)
@@ -287,6 +307,8 @@ def scalars(content: str) -> list[Scalar]:
     :param content: the file text.
     """
     reader = _Reader()
+    if content.startswith("\ufeff"):
+        content = content[1:]
     raw_lines = content.splitlines()
     # (column, name, is_sequence_item)
     stack: list[tuple[int, str, bool]] = []
@@ -308,9 +330,15 @@ def scalars(content: str) -> list[Scalar]:
             _emit_block(reader, block)
             block = None
 
-        if stripped in ("---", "...") or stripped.startswith(("--- ", "%")):
+        if stripped in ("---", "...") or stripped.startswith("%"):
             stack = []
             continue
+        if stripped.startswith("--- "):
+            # Content after the document marker starts the new document.
+            stack = []
+            raw = stripped[4:].lstrip()
+            stripped = raw.strip()
+            indent = 0
         line = _strip_comment(raw)
         if not line.strip():
             continue
@@ -359,11 +387,14 @@ def scalars(content: str) -> list[Scalar]:
             block = (limit, path, lineno, bare.startswith(">"), [])
             continue
         if bare.startswith(("{", "[")):
-            text = value
-            while _bracket_balance(text) > 0 and i < len(raw_lines):
-                text += "\n" + _strip_comment(raw_lines[i])
+            pieces = [value]
+            balance = _bracket_balance(value)
+            while balance > 0 and i < len(raw_lines):
+                piece = _strip_comment(raw_lines[i])
+                pieces.append(piece)
+                balance += _bracket_balance(piece)
                 i += 1
-            reader.flow(path, text, lineno)
+            reader.flow(path, "\n".join(pieces), lineno)
             continue
         if entry is None and not path:
             continue  # a bare scalar document

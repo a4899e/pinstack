@@ -32,7 +32,7 @@ from pinstack.core import (
     image_digest_problem,
     is_commit_sha,
 )
-from pinstack.yaml_scan import ITEM, Scalar, scalars
+from pinstack.yaml_scan import ITEM, UNRESOLVED_ALIAS, Scalar, scalars
 
 _ACTION_FILES = ("action.yml", "action.yaml")
 
@@ -85,9 +85,7 @@ def _workflow_image(path: tuple[str, ...]) -> Optional[str]:
     """Return a label if ``path`` is a job or service container image."""
     if len(path) < 3 or path[0] != "jobs":
         return None
-    if len(path) == 3 and path[2] == "container":
-        return "container image"
-    if len(path) == 4 and path[2] == "container" and path[3] == "image":
+    if path[2:] in (("container",), ("container", "image")):
         return "container image"
     if len(path) == 5 and path[2] == "services" and path[4] == "image":
         return "service '{}' image".format(path[3])
@@ -127,7 +125,9 @@ class GitHubActionsChecker(Checker):
                     continue
 
                 try:
-                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    with open(
+                        full_path, "r", encoding="utf-8-sig", errors="replace"
+                    ) as fh:
                         content = fh.read()
                 except OSError:
                     continue
@@ -152,13 +152,17 @@ class GitHubActionsChecker(Checker):
         path = item.path
         if _is_step_uses(path):
             if item.alias:
-                return "uses: '{}' is a YAML alias pinstack could not resolve".format(
-                    item.value
-                )
+                return "uses: '{}' {}".format(item.value, UNRESOLVED_ALIAS)
             return _action_ref_problem(item.value)
 
         if is_action:
-            if path == ("runs", "image") and item.value.startswith("docker://"):
+            if path != ("runs", "image"):
+                return None
+            if item.alias:
+                return "docker action image '{}' {}".format(
+                    item.value, UNRESOLVED_ALIAS
+                )
+            if item.value.startswith("docker://"):
                 problem = image_digest_problem(item.value)
                 if problem:
                     return "docker action image '{}' {}".format(item.value, problem)
@@ -168,8 +172,6 @@ class GitHubActionsChecker(Checker):
         if label is None or not item.value:
             return None
         if item.alias:
-            return "{} '{}' is a YAML alias pinstack could not resolve".format(
-                label, item.value
-            )
+            return "{} '{}' {}".format(label, item.value, UNRESOLVED_ALIAS)
         problem = _image_problem(item.value)
         return "{} '{}' {}".format(label, item.value, problem) if problem else None

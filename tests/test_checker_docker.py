@@ -581,3 +581,24 @@ class TestComposeYamlForms:
             "    labels:\n      image: fake\n    environment:\n      image: fake\n"
         )
         assert findings == []
+
+
+class TestComposeReviewFollowUps:
+    def test_service_named_like_a_data_key_is_checked(self):
+        assert _compose_text("services:\n  labels:\n    image: evil:latest\n") == [
+            (3, "image 'evil:latest' is not pinned with @sha256: digest")
+        ]
+
+    def test_build_args_image_is_data(self):
+        text = (
+            "services:\n  web:\n    image: nginx" + _DIGEST + "\n"
+            "    build:\n      context: .\n      args:\n        image: base:1\n"
+        )
+        assert _compose_text(text) == []
+
+    def test_text_after_digest_is_malformed(self):
+        """A quoted value ending in an escaped newline is not a digest pin."""
+        findings = _compose_text(
+            'services:\n  w:\n    image: "nginx' + _DIGEST + '\\n"\n'
+        )
+        assert "malformed @sha256: digest" in findings[0][1]

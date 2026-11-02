@@ -260,3 +260,66 @@ class TestGHAFlowStyleAndContainers:
         assert [f.message for f in findings] == [
             "docker action image 'docker://alpine:3' is not pinned with @sha256: digest"
         ]
+
+
+class TestGHAReviewFollowUps:
+    """Local review of the L1/L3 change."""
+
+    def test_apostrophe_in_flow_scalar_does_not_swallow_lines(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    container: node:18\n    steps:\n"
+            "      - {name: Don't fail, run: echo}\n"
+            "      - uses: actions/checkout@v4\n"
+        )
+        assert [line for line, _ in findings] == [3, 6]
+
+    def test_bom_prefixed_workflow(self):
+        findings = _workflow(
+            "\ufeffjobs:\n  call:\n    uses: o/r/.github/workflows/x.yml@main\n"
+            "  t:\n    container: node:18\n"
+        )
+        assert [line for line, _ in findings] == [3, 5]
+
+    def test_key_only_flow_entry(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n      - {continue-on-error, uses: actions/checkout@v4}\n"
+        )
+        assert [line for line, _ in findings] == [4]
+
+    def test_document_marker_with_content(self):
+        findings = _workflow("--- {jobs: {b: {container: node:18}}}\n")
+        assert [m for _, m in findings] == [
+            "container image 'node:18' is not pinned with @sha256: digest"
+        ]
+
+    def test_action_image_alias_is_reported(self):
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "action.yml"), "w") as fh:
+                fh.write("runs:\n  using: docker\n  image: *img\n")
+            findings = GitHubActionsChecker().check({d: {"action.yml"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "docker action image '*img' is a YAML alias pinstack could not resolve"
+        ]
+
+    def test_multiline_flow_parses_in_linear_time(self):
+        import time
+
+        from pinstack.yaml_scan import scalars
+
+        def run(n):
+            body = "".join(
+                "  {{name: s{0}, uses: a/b@v{0}}},\n".format(i) for i in range(n)
+            )
+            text = "steps: [\n" + body + "]\n"
+            start = time.perf_counter()
+            assert len(scalars(text)) == 2 * n
+            return time.perf_counter() - start
+
+        small, big = run(1000), run(4000)
+        assert big < small * 12, (small, big)

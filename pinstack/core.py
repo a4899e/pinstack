@@ -90,8 +90,15 @@ def is_commit_sha(ref: str) -> bool:
 
 
 # An OCI image digest pin: "@sha256:" and exactly 64 lowercase hex characters,
-# ending the reference (name[:tag]@sha256:<hex>).
-_IMAGE_DIGEST_RE = __import__("re").compile(r"@sha256:[0-9a-f]{64}$")
+# ending the reference (name[:tag]@sha256:<hex>). \Z, not $, so a trailing
+# newline does not count as "the end".
+_IMAGE_DIGEST_RE = __import__("re").compile(r"@sha256:[0-9a-f]{64}\Z")
+
+# How checkers describe an image reference that interpolates a variable.
+IMAGE_VARIABLE_PROBLEM = (
+    "uses a variable reference which cannot be verified;"
+    " write the image reference with an @sha256: digest"
+)
 
 
 def image_digest_problem(image: str) -> Optional[str]:
