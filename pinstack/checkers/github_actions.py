@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, is_commit_sha
 
 # Matches lines containing uses: <ref>
 _USES_RE = re.compile(r"^\s*-?\s*uses:\s*(\S+)")
-
-# A 40-character lowercase hex SHA
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # Workflow files live under .github/workflows/ (any depth above that)
 _WORKFLOW_PATH_PARTS = (".github", "workflows")
@@ -30,14 +26,21 @@ def _is_workflow_path(rel_path: str) -> bool:
 class GitHubActionsChecker(Checker):
     name = "github_actions"
     description = "Checks GitHub Actions workflow files for SHA-pinned action refs"
-    patterns: list[str] = ["*.yml", "*.yaml"]
+    # Path-qualified so that only workflow files count toward --max-files;
+    # every other YAML file in the repository would otherwise be indexed.
+    patterns: list[str] = [
+        ".github/workflows/*.yml",
+        ".github/workflows/*.yaml",
+        "*/.github/workflows/*.yml",
+        "*/.github/workflows/*.yaml",
+    ]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
-                if not any(fnmatch.fnmatch(fname, p) for p in self.patterns):
+                if not fname.endswith((".yml", ".yaml")):
                     continue
 
                 full_path = os.path.join(dir_path, fname)
@@ -96,7 +99,7 @@ class GitHubActionsChecker(Checker):
                         continue
 
                     action_part, pin = ref.rsplit("@", 1)
-                    if not _SHA_RE.match(pin):
+                    if not is_commit_sha(pin):
                         findings.append(
                             Finding(
                                 checker=self.name,

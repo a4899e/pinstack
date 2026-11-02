@@ -32,7 +32,8 @@ _SECURITY_SEVERITY = {
     "cargo": "8.0",
     "go": "8.0",
     "terraform": "8.0",
-    # High (7.0): missing or stale lock file
+    # High (7.0): missing or stale lock file, or a scan that skipped files
+    "pinstack": "7.0",
     "pyproject": "7.0",
     "package_json": "7.0",
     "gemfile": "7.0",

@@ -113,12 +113,12 @@ silently defeats the pinning it was supposed to guarantee.
 | Checker | Files Examined | What Is Checked |
 |---|---|---|
 | `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
-| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale |
-| `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | No `^`, `~`, or range specifiers in any dependency section; declared packages must appear in the lock file |
+| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale. A lock file that parses to no packages is reported. |
+| `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | Every dependency is an exact `x.y.z` version, a local reference (`workspace:`, `file:`, `link:`, a path), an `npm:<name>@x.y.z` alias, or a git source fixed to a full 40-character commit SHA; anything else (`^`, `~`, `*`, `latest`, `1.x`, ranges, tarball URLs, branch or tag refs) is a finding. The same rules apply to `overrides`, `resolutions`, and `pnpm.overrides`. Declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |
 | `pnpm_lock` | `pnpm-lock.yaml` | `integrity` hashes present |
-| `dockerfile` | `Dockerfile*` | `@sha256:` digest on every `FROM` |
+| `dockerfile` | `Dockerfile*`, `Containerfile*`, `*.dockerfile`, `*.Dockerfile` | `@sha256:` digest on every image the build pulls: the `# syntax=` frontend, `FROM`, `COPY`/`ADD --from`, and `RUN --mount=from=`, including under `ONBUILD`. A bare name such as `alpine` is an image unless declared as a stage with `AS`, and `$VAR` references are reported because `--build-arg` can override them |
 | `compose` | `docker-compose*.yml`, `docker-compose*.yaml`, `compose*.yml`, `compose*.yaml` | `@sha256:` digest on `image:` references |
 | `github_actions` | `*.yml` and `*.yaml` under `.github/workflows/` | 40-char commit SHA after `@` in `uses:` |
 | `go` | `go.mod`, `go.sum` | `go.sum` exists alongside `go.mod`; `h1:` hashes present; every `require` appears in `go.sum` |
@@ -146,8 +146,8 @@ pinstack [PATH] [OPTIONS]
 | `--exclude NAME,NAME` | Skip these checkers (comma-separated). Mutually exclusive with `--check`. |
 | `--format FORMAT` | Output format: `text` (default) or `sarif`. |
 | `--exit-zero` | Always exit 0, even when findings are present. Useful for advisory-only runs. |
-| `--max-depth N` | Maximum directory depth to recurse into. Default: 4. Increase for deep monorepos. |
-| `--max-files N` | Maximum number of dependency files to index. Default: 384. Increase for large monorepos. A warning is printed to stderr if the limit is reached. |
+| `--max-depth N` | Maximum directory depth to check. Default: 4 (the scan root is depth 0, so files up to three directories down are checked). Deeper directories are still walked until a dependency file is found there; that file is reported as a `pinstack` finding (`scan incomplete`), so the gate fails rather than passing on a partial scan. Increase for deep monorepos. |
+| `--max-files N` | Maximum number of dependency files to check. Default: 384. Directories are indexed whole, so a manifest is never checked without its lock file. Reaching the limit is reported as a `pinstack` finding (`scan incomplete`) on the first file left unchecked. Increase for large monorepos. |
 | `--exclude-dir DIR,DIR` | Additional directory names to skip during traversal (comma-separated). |
 | `--list-checkers` | Print all available checkers and exit. |
 | `--version` | Print the pinstack version and exit. |
@@ -157,7 +157,7 @@ pinstack [PATH] [OPTIONS]
 | Code | Meaning |
 |---|---|
 | `0` | No findings (or `--exit-zero` was set). |
-| `1` | One or more findings reported. |
+| `1` | One or more findings reported. This includes a scan that `--max-depth` or `--max-files` left incomplete. |
 | `2` | Runtime error. |
 
 ---
