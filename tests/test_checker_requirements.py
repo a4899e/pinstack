@@ -359,11 +359,6 @@ class TestRequirementsIncludes:
     def test_includes_that_cannot_be_checked(self):
         assert _scan("include_edges") == [
             (
-                "constraints.txt",
-                1,
-                "'urllib3' is not pinned with ==; use package==version",
-            ),
-            (
                 "requirements.txt",
                 2,
                 "-r 'missing.txt' does not exist, so its requirements cannot be checked",
@@ -420,10 +415,13 @@ class TestRequirementsHashValidation:
         assert "uses md5, which pip does not accept for --hash" in self.by_line[3]
 
     def test_short_digest(self):
-        assert "'sha256:abc' has 3 hex characters; sha256 needs 64" in self.by_line[4]
+        assert (
+            "'sha256:abc': sha256 hash has wrong length: expected 64 hex chars, got 3"
+            in self.by_line[4]
+        )
 
     def test_non_hex_digest(self):
-        assert "is not a hex digest" in self.by_line[5]
+        assert "sha256 hash contains non-hex characters" in self.by_line[5]
 
     def test_missing_algorithm(self):
         assert "is not <algorithm>:<hex digest>" in self.by_line[6]
@@ -434,7 +432,79 @@ class TestRequirementsHashValidation:
     def test_url_reference_hash_validated(self):
         from pinstack.checkers.requirements import _analyze_line
 
-        result = _analyze_line(
+        results = _analyze_line(
             "pkg @ https://example.invalid/p.tar.gz --hash=sha256:abc"
         )
-        assert result.kind == "hash_invalid"
+        assert [r.kind for r in results] == ["hash_invalid"]
+
+
+def _req(text, extra=None):
+    # type: (str, dict) -> list
+    """Check one requirements.txt (plus any extra files) in a temporary root."""
+    d = tempfile.mkdtemp()
+    try:
+        for name, content in dict({"requirements.txt": text}, **(extra or {})).items():
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write(content)
+        findings = RequirementsChecker().check({d: {"requirements.txt"}}, d)
+        return [(f.path, f.line, f.message) for f in findings]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_H = "--hash=sha256:" + "ab" * 32
+
+
+class TestRequirementsPipGrammar:
+    """Local review of L2: read lines the way pip's req_file does."""
+
+    def test_url_fragment_does_not_hide_hash(self):
+        assert _req("pkg @ https://x.invalid/p.tar.gz#egg=pkg " + _H + "\n") == []
+
+    def test_comment_line_never_continues(self):
+        """pip does not join a comment ending in a backslash with the next line."""
+        assert _req("# pinned deps \\\nrequests>=2\n") == [
+            (
+                "requirements.txt",
+                2,
+                "'requests' is not pinned with ==; use package==version",
+            )
+        ]
+
+    def test_long_editable(self):
+        findings = _req("--editable git+https://github.com/x/y.git#egg=y\n")
+        assert [m for _, _, m in findings] == [
+            "'git+https://github.com/x/y.git#egg=y' is not pinned with ==;"
+            " use package==version"
+        ]
+
+    def test_include_after_other_options(self):
+        findings = _req("--pre -r extra.txt\n", {"extra.txt": "flask\n"})
+        assert findings == [
+            ("extra.txt", 1, "'flask' is not pinned with ==; use package==version")
+        ]
+
+    def test_abbreviated_long_option(self):
+        findings = _req("--requirem extra.txt\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_tab_before_comment_on_include(self):
+        findings = _req("-r extra.txt\t# note\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_hash_algorithm_is_case_sensitive(self):
+        """pip rejects --hash=SHA256:..., so a file using it cannot be installed."""
+        findings = _req("foo==1.0 --hash=SHA256:" + "ab" * 32 + "\n")
+        assert "uses SHA256, which pip does not accept for --hash" in findings[0][2]
+
+    def test_constraint_files_are_not_requirements(self):
+        assert _req("-c constraints.txt\n", {"constraints.txt": "urllib3<3\n"}) == []
+
+    def test_bom_is_ignored(self):
+        assert _req("\ufeffrequests>=2\n") == [
+            (
+                "requirements.txt",
+                1,
+                "'requests' is not pinned with ==; use package==version",
+            )
+        ]
