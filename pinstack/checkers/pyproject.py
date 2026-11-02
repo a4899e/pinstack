@@ -490,6 +490,9 @@ _INLINE_TABLE_VERSION_RE = re.compile(r'version\s*=\s*["\']([^"\']+)["\']')
 _POETRY_BAD_CONSTRAINT_RE = re.compile(r"^(\^|~|>=|>(?!=)|<=|<(?!=)|!=|\*)")
 
 
+_OPERATOR_SPACE_RE = re.compile(r"^(==?|!=|[<>]=?|~=?|\^)\s+")
+
+
 def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
     """
     Check whether a Poetry version constraint is an exact pin.
@@ -498,7 +501,9 @@ def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
     Acceptable:  ==x.y.z  or  x.y.z  (bare version, no operator — exact in Poetry)
     Flagged:     ^x, ~x, >=x, >x, <x, <=x, !=x, *
     """
-    v = version.strip()
+    # Poetry allows whitespace between an operator and its version
+    # (``== 1.2.3``); that is still a single constraint.
+    v = _OPERATOR_SPACE_RE.sub(r"\1", version.strip())
     if not v:
         return True, "'{}' has no version constraint; use exact pinning".format(pkg)
 
@@ -575,6 +580,9 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
     lines = content.splitlines()
     # [tool.poetry.dependencies.<name>] table being read: [name, line, version]
     table_dep: Optional[list] = None
+    # Dependencies spread over dotted keys in the current section
+    # (``foo.git = ...`` + ``foo.rev = ...``): (table, name) -> [line, fields]
+    dotted: dict[tuple[str, str], list] = {}
     skip_through = -1
 
     def add(pkg: str, value: object, lineno: int) -> None:
@@ -583,9 +591,12 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
         for version in _poetry_versions(value):
             results.append((pkg, version, lineno))
 
-    def flush_table_dep() -> None:
+    def flush_pending() -> None:
         if table_dep is not None:
             add(table_dep[0], table_dep[2], table_dep[1])
+        for (_, pkg), (dep_line, fields) in dotted.items():
+            add(pkg, fields, dep_line)
+        dotted.clear()
 
     for idx, line in enumerate(lines):
         if idx <= skip_through:
@@ -596,7 +607,7 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
         # Section header
         section_match = _SECTION_RE.match(stripped)
         if section_match:
-            flush_table_dep()
+            flush_pending()
             table_dep = None
             section = _split_key(section_match.group(1))
             if len(section) >= 2 and _is_poetry_dep_section(".".join(section[:-1])):
@@ -628,13 +639,12 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
         elif _is_poetry_dep_section(".".join(full)):
             target = None  # dependencies = { ... }
         elif len(full) >= 3 and _is_poetry_dep_section(".".join(full[:-2])):
-            # dependencies.foo.version = "1.0"
-            if full[-1] == "version":
-                add(
-                    full[-2],
-                    _extract_string_value(_strip_inline_comment(kv_match.group(2))),
-                    lineno,
-                )
+            # dependencies.foo.version = "1.0", foo.git = "...": any field
+            # declares the dependency; it has a version only if one is set.
+            entry = dotted.setdefault((".".join(full[:-2]), full[-2]), [lineno, {}])
+            entry[1][full[-1]] = _extract_string_value(
+                _strip_inline_comment(kv_match.group(2))
+            )
             continue
         else:
             continue
@@ -654,7 +664,10 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
             for pkg, dep_value in value.items():
                 add(pkg, dep_value, lineno)
 
-    flush_table_dep()
+    flush_pending()
+    # Dotted and table-form dependencies are emitted when their section
+    # ends; report everything in file order.
+    results.sort(key=lambda r: r[2])
     return results
 
 

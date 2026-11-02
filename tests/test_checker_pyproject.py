@@ -1450,3 +1450,52 @@ class TestPyprojectReviewFollowUps:
         assert [f.message for f in findings] == [
             "lock files are stale: missing 1 dependency (foo)"
         ]
+
+    def test_dotted_source_fields_declare_a_dependency(self):
+        """Codex #14 follow-up: `foo.git` + `foo.rev` is `foo = { git, rev }`."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                "[tool.poetry.dependencies]\n"
+                'foo.git = "https://github.com/u/r.git"\n'
+                'foo.rev = "main"\n',
+            )
+            findings = PyprojectChecker().check({tmpdir: {"pyproject.toml"}}, tmpdir)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert "'foo' has no version constraint; use exact pinning" in [
+            f.message for f in findings
+        ]
+
+    def test_dotted_fields_merge_into_one_entry(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            'foo.version = "1.0.0"\n'
+            'foo.extras = ["a"]\n'
+            'bar = "2.0.0"\n'
+            'baz.path = "../baz"\n'
+        )
+        assert deps == [("foo", "1.0.0", 2), ("bar", "2.0.0", 4), ("baz", "", 5)]
+
+    def test_space_after_exact_operator(self):
+        """Codex #14 follow-up: Poetry accepts `== 1.2.3` as one exact constraint."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(tmpdir, '[tool.poetry.dependencies]\nfoo = "== 1.2.3"\n')
+            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "foo"\nversion = "1.2.3"\n')
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "poetry.lock"}}, tmpdir
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert findings == []
+
+    def test_space_after_range_operator_still_flagged(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        assert _check_poetry_version("foo", ">= 1.2.3")[0]
+        assert _check_poetry_version("foo", "== 1.2.3 || ^2")[0]
