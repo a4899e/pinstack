@@ -1349,3 +1349,104 @@ class TestPoetryDependencyForms:
             'version = "^3.9"\n'
         )
         assert deps == [("lint", "1.0.0", 1), ("gitdep", "", 3)]
+
+
+class TestPyprojectReviewFollowUps:
+    """Follow-ups from the local and Codex reviews of the M4 changes."""
+
+    def test_quoted_dotted_poetry_table_name(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            '[tool.poetry.dependencies."zope.interface"]\nversion = "^5"\n'
+        )
+        assert deps == [("zope.interface", "^5", 1)]
+
+    def test_poetry_inline_and_dotted_dependency_tables(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry]\n"
+            'dependencies = { requests = "^2", flask = { version = "2.3.2" } }\n'
+            'dependencies.boto3 = "^1"\n'
+            'group.dev.dependencies.pytest = "7.4.0"\n'
+            'dependencies.black.version = "^23"\n'
+        )
+        assert deps == [
+            ("requests", "^2", 2),
+            ("flask", "2.3.2", 2),
+            ("boto3", "^1", 3),
+            ("pytest", "7.4.0", 4),
+            ("black", "^23", 5),
+        ]
+
+    def test_multiline_poetry_inline_table(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            "foo = {\n"
+            '  version = "^1",\n'
+            '  extras = ["a"],\n'
+            "}\n"
+            'bar = "1.0.0"\n'
+        )
+        assert deps == [("foo", "^1", 2), ("bar", "1.0.0", 6)]
+
+    def test_poetry_combined_constraints_flagged(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        for v in ("1.0.0 || ^2.0", "1.0.0,<3", "1.0.0 <3", "1.0.0|2.0.0"):
+            assert _check_poetry_version("foo", v)[0], v
+        assert not _check_poetry_version("foo", "1.0.0")[0]
+
+    def test_poetry_tables_not_read_as_pep508_arrays(self):
+        arrays = extract_dependency_arrays(
+            "[tool.poetry.dependencies.requests]\n"
+            'version = "2.31.0"\n'
+            'extras = ["security"]\n'
+            "[tool.poetry.dependencies]\n"
+            "foo = [\n"
+            '  { version = "1.0.0", python = "<3.8" },\n'
+            "]\n"
+        )
+        assert arrays == []
+
+    def test_unparsable_inline_project_table_reported(self):
+        """A dependency table this parser cannot read must not pass silently."""
+        arrays = extract_dependency_arrays('project = { dependencies = ["a>=1" }\n')
+        assert len(arrays) == 1
+        from pinstack.checkers.pyproject import _check_dep_specifier
+
+        assert _check_dep_specifier(arrays[0][0][0])[0]
+
+    def test_spaced_and_quoted_keys(self):
+        assert extract_dependency_arrays(
+            'project = { optional-dependencies . dev = ["a>=1"] }\n'
+        ) == [(["a>=1"], "dev")]
+        assert extract_dependency_arrays(
+            '"project" = { dependencies = ["b>=1"] }\n'
+        ) == [(["b>=1"], "dependencies")]
+        assert extract_dependency_arrays(
+            'project."optional-dependencies".dev = ["c>=1"]\n'
+        ) == [(["c>=1"], "dev")]
+
+    def test_multi_constraint_package_listed_once_when_stale(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            _make_pyproject(
+                tmpdir,
+                "[tool.poetry.dependencies]\n"
+                'foo = [{ version = "1.0.0", python = "<3.8" },'
+                ' { version = "1.0.0", python = ">=3.8" }]\n',
+            )
+            with open(os.path.join(tmpdir, "poetry.lock"), "w") as fh:
+                fh.write('[[package]]\nname = "other"\n')
+            findings = PyprojectChecker().check(
+                {tmpdir: {"pyproject.toml", "poetry.lock"}}, tmpdir
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "lock files are stale: missing 1 dependency (foo)"
+        ]

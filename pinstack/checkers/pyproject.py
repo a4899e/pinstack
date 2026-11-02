@@ -22,10 +22,30 @@ _POETRY_GROUP_DEPS_RE = re.compile(r"^tool\.poetry\.group\.[^.]+\.dependencies$"
 # Matches a TOML section header like [project] or [project.optional-dependencies]
 _SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]")
 
-# Matches a key = [ start of an array assignment (bare or quoted keys)
-_ARRAY_START_RE = re.compile(
-    r'^\s*(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.\-]+))\s*=\s*\['
-)
+# A TOML key: bare or quoted parts joined by dots, with optional spaces
+# around each dot (project . "optional-dependencies" . dev).
+_KEY_PART = r"""(?:"[^"]*"|'[^']*'|[A-Za-z0-9_\-]+)"""
+_KEY = _KEY_PART + r"(?:\s*\.\s*" + _KEY_PART + r")*"
+_KEY_PART_RE = re.compile(r"""\s*(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_\-]+))\s*""")
+
+
+def _split_key(key: str) -> list[str]:
+    """Split a TOML key into its unquoted parts: ``a."b.c"`` is ``[a, b.c]``."""
+    parts: list[str] = []
+    pos = 0
+    while pos < len(key):
+        m = _KEY_PART_RE.match(key, pos)
+        if not m or m.end() == pos:
+            break
+        parts.append(next(g for g in m.groups() if g is not None))
+        pos = m.end()
+        if pos < len(key) and key[pos] == ".":
+            pos += 1
+    return parts
+
+
+# Matches a key = [ start of an array assignment
+_ARRAY_START_RE = re.compile(r"^\s*(" + _KEY + r")\s*=\s*\[")
 
 # Operators that are NOT ==
 _BAD_OPERATORS_RE = re.compile(r"(!=|~=|>=|<=|>(?!=)|<(?!=))")
@@ -71,11 +91,19 @@ def _strip_inline_comment(line: str) -> str:
 # PEP 621 / PEP 735 dependency arrays, e.g.
 #   project = { name = "x", dependencies = ["requests>=2"] }
 #   optional-dependencies = { dev = ["pytest"] }        (under [project])
-_INLINE_TABLE_START_RE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*=\s*\{")
+_INLINE_TABLE_START_RE = re.compile(r"^\s*(" + _KEY + r")\s*=\s*\{")
+
+
+_INLINE_KEY_RE = re.compile(_KEY)
+_INLINE_SCALAR_RE = re.compile(r"[^\s,\]}]+")
 
 
 class _InlineParseError(ValueError):
     pass
+
+
+# Parse errors that more input could resolve.
+_UNTERMINATED = frozenset(["unexpected end of value", "unterminated string"])
 
 
 def _parse_inline_value(text: str, i: int) -> tuple[object, int]:
@@ -106,7 +134,9 @@ def _parse_inline_value(text: str, i: int) -> tuple[object, int]:
         i += 1
         while True:
             i = _skip_ws(text, i)
-            if i < len(text) and text[i] == "]":
+            if i >= len(text):
+                raise _InlineParseError("unexpected end of value")
+            if text[i] == "]":
                 return items, i + 1
             value, i = _parse_inline_value(text, i)
             items.append(value)
@@ -118,19 +148,20 @@ def _parse_inline_value(text: str, i: int) -> tuple[object, int]:
         i += 1
         while True:
             i = _skip_ws(text, i)
-            if i < len(text) and text[i] == "}":
+            if i >= len(text):
+                raise _InlineParseError("unexpected end of value")
+            if text[i] == "}":
                 return table, i + 1
-            m = re.compile(r'"([^"]*)"|\'([^\']*)\'|([A-Za-z0-9_.\-]+)').match(text, i)
+            m = _INLINE_KEY_RE.match(text, i)
             if not m:
                 raise _InlineParseError("expected a key")
-            key = m.group(1) if m.group(1) is not None else (m.group(2) or m.group(3))
             i = _skip_ws(text, m.end())
             if i >= len(text) or text[i] != "=":
                 raise _InlineParseError("expected '='")
             value, i = _parse_inline_value(text, i + 1)
             # Dotted keys nest: a.b = 1 is {"a": {"b": 1}}
             target = table
-            parts = key.split(".") if m.group(3) else [key]
+            parts = _split_key(m.group(0))
             for part in parts[:-1]:
                 nested = target.setdefault(part, {})
                 if not isinstance(nested, dict):
@@ -140,7 +171,7 @@ def _parse_inline_value(text: str, i: int) -> tuple[object, int]:
             i = _skip_ws(text, i)
             if i < len(text) and text[i] == ",":
                 i += 1
-    m = re.compile(r"[^\s,\]}]+").match(text, i)
+    m = _INLINE_SCALAR_RE.match(text, i)
     if not m:
         raise _InlineParseError("unexpected character")
     return m.group(0), m.end()
@@ -192,34 +223,49 @@ def _inline_table_dep_arrays(
     return results
 
 
-def _parse_inline_table_at(
-    lines: list[str], index: int, brace_pos: int
-) -> tuple[Optional[dict], int]:
-    """Parse the inline table whose ``{`` is at ``lines[index][brace_pos]``.
+def _parse_value_at(lines: list[str], index: int, start: int) -> tuple[object, int]:
+    """Parse the TOML value starting at ``lines[index][start]``.
 
-    Inline tables are single-line in TOML 1.0 and may span lines in TOML 1.1.
-    Returns (table, index of the line holding the closing brace), or
-    (None, index) when the text is not a parsable inline table.
+    Inline tables are single-line in TOML 1.0 and may span lines in TOML
+    1.1, and arrays may span lines in both. Lines are added only while the
+    value is still open, so a one-line value never copies the rest of the
+    file. Returns (value, index of the line where the value ends).
+
+    :raises _InlineParseError: The text is not a value this parser reads.
     """
-    text = "\n".join([lines[index][brace_pos:]] + lines[index + 1 :])
-    try:
-        value, end = _parse_inline_value(text, 0)
-    except _InlineParseError:
-        return None, index
-    if not isinstance(value, dict):
-        return None, index
-    return value, index + text.count("\n", 0, end)
+    text = lines[index][start:]
+    end_index = index
+    while True:
+        try:
+            value, _ = _parse_inline_value(text, 0)
+            return value, end_index
+        except _InlineParseError as exc:
+            if str(exc) not in _UNTERMINATED or end_index + 1 >= len(lines):
+                raise
+            end_index += 1
+            text += "\n" + lines[end_index]
 
 
 def _effective_location(section: str, dotted_key: str) -> tuple[str, str]:
-    """Split a bare dotted key into the table it lands in and its last part.
+    """Split a dotted key into the table it lands in and its last part.
 
     ``[project]`` + ``optional-dependencies.dev`` is
     (``project.optional-dependencies``, ``dev``); a top-level
     ``project.dependencies`` is (``project``, ``dependencies``).
     """
-    prefix, _, key = dotted_key.rpartition(".")
-    return ".".join(p for p in (section, prefix) if p), key
+    parts = _split_key(dotted_key)
+    return ".".join([p for p in [section] if p] + parts[:-1]), parts[-1]
+
+
+# Locations whose inline tables hold PEP 621 / PEP 735 dependency arrays.
+_INLINE_DEP_LOCATIONS = frozenset(
+    [_SECTION_PROJECT, _SECTION_OPTIONAL, _SECTION_DEP_GROUPS]
+)
+
+
+def _is_poetry_section(section: str) -> bool:
+    """Poetry tables hold Poetry constraints, not PEP 508 strings."""
+    return section == "tool.poetry" or section.startswith("tool.poetry.")
 
 
 def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
@@ -263,7 +309,7 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
                 current_deps = []
                 current_label = ""
                 array_depth = 0
-            current_section = section_match.group(1).strip()
+            current_section = ".".join(_split_key(section_match.group(1)))
             continue
 
         # --- If inside a dependency array, collect items ---
@@ -304,8 +350,22 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
         inline_match = _INLINE_TABLE_START_RE.match(stripped)
         if inline_match:
             section, key = _effective_location(current_section, inline_match.group(1))
-            table, skip_through = _parse_inline_table_at(lines, idx, line.index("{"))
-            if table is not None:
+            location = ".".join(p for p in (section, key) if p)
+            if location not in _INLINE_DEP_LOCATIONS:
+                continue
+            try:
+                table, skip_through = _parse_value_at(
+                    lines,
+                    idx,
+                    len(line)
+                    - len(line.lstrip())
+                    + stripped.index("{", inline_match.end(1)),
+                )
+            except _InlineParseError:
+                # Unreadable dependencies must not pass; report the text.
+                results.append(([stripped], key))
+                continue
+            if isinstance(table, dict):
                 results.extend(_inline_table_dep_arrays(section, key, table))
             continue
 
@@ -314,16 +374,14 @@ def extract_dependency_arrays(content: str) -> list[tuple[list[str], str]]:
         if not array_match:
             continue
 
-        if array_match.group(3):
-            # A bare dotted key extends the section: [project] with
-            # optional-dependencies.dev = [...], or a top-level
-            # project.dependencies = [...].
-            current_array_section, key = _effective_location(
-                current_section, array_match.group(3)
-            )
-        else:
-            current_array_section = current_section
-            key = array_match.group(1) or array_match.group(2)
+        # A dotted key extends the section: [project] with
+        # optional-dependencies.dev = [...], or a top-level
+        # project.dependencies = [...].
+        current_array_section, key = _effective_location(
+            current_section, array_match.group(1)
+        )
+        if _is_poetry_section(current_array_section):
+            continue
 
         # Determine if this is a dependency array we care about.
         # - Must be inside a section (no bare top-level arrays).
@@ -422,7 +480,7 @@ def _is_poetry_dep_section(section: str) -> bool:
 
 
 # Matches a simple key = "value" TOML assignment (no array)
-_TOML_KV_RE = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+)$")
+_TOML_KV_RE = re.compile(r"^\s*(" + _KEY + r")\s*=\s*(.+)$")
 
 # Matches an inline table: { version = "...", ... }
 _INLINE_TABLE_VERSION_RE = re.compile(r'version\s*=\s*["\']([^"\']+)["\']')
@@ -447,6 +505,11 @@ def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
     if "*" in v:
         return True, "'{}' uses wildcard '{}'; use exact pinning".format(pkg, v)
 
+    # "1.0.0 || ^2.0", "1.0.0,<3" and "1.0.0 <3" combine constraints into
+    # a range even when the first one is exact.
+    if "|" in v or "," in v or len(v.split()) > 1:
+        return True, "'{}' combines constraints '{}'; use exact pinning".format(pkg, v)
+
     if v.startswith("=="):
         # Must have something after ==
         remainder = v[2:].strip()
@@ -466,15 +529,22 @@ def _check_poetry_version(pkg: str, version: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _poetry_table_dependency(section: str) -> Optional[str]:
-    """Return ``name`` for a ``[tool.poetry.dependencies.<name>]`` table header.
+def _poetry_versions(value: object) -> list[str]:
+    """Return the version constraint(s) of one Poetry dependency value.
 
-    Also matches the dev-dependencies and group dependency sections.
+    A string is the constraint. A table yields its ``version``, or ``""``
+    when it has none (a git, path or URL source). An array holds one
+    constraint table per Python or platform marker and yields one entry
+    for each.
     """
-    parent, _, name = section.rpartition(".")
-    if parent and _is_poetry_dep_section(parent):
-        return name.strip().strip("\"'")
-    return None
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        version = value.get("version")
+        return [version if isinstance(version, str) else ""]
+    if isinstance(value, list) and value:
+        return [v for item in value for v in _poetry_versions(item)]
+    return [""]
 
 
 def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
@@ -482,32 +552,40 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
     Parse pyproject.toml content and extract Poetry-style dependency entries.
 
     Returns a list of (package_name, version_string, line_number) tuples.
-    Only entries under Poetry dependency sections are returned:
-      - [tool.poetry.dependencies]
-      - [tool.poetry.dev-dependencies]
-      - [tool.poetry.group.<name>.dependencies]
+    Only entries under Poetry dependency tables are returned:
+      - tool.poetry.dependencies
+      - tool.poetry.dev-dependencies
+      - tool.poetry.group.<name>.dependencies
 
-    Each dependency may be written as a string (``foo = "1.0"``), an inline
-    table (``foo = { version = "1.0" }``), a table of its own
-    (``[tool.poetry.dependencies.foo]`` with a ``version`` key), or an array
-    of constraint tables, one per Python or platform marker
-    (``foo = [{ version = "1.0", python = "<3.8" }, ...]``). An array yields
-    one entry per constraint. A table or constraint with no ``version`` key
-    (a git, path or URL source) yields an empty version.
+    Those tables may be written as sections, as dotted keys
+    (``[tool.poetry]`` + ``dependencies.foo = "1.0"``), or as an inline
+    table (``dependencies = { foo = "1.0" }``). Each dependency may be a
+    string, an inline table (``foo = { version = "1.0" }``, possibly over
+    several lines), a table of its own (``[tool.poetry.dependencies.foo]``
+    with a ``version`` key), or an array of constraint tables
+    (``foo = [{ version = "1.0", python = "<3.8" }, ...]``), which yields one
+    entry per constraint. A dependency with no ``version`` (a git, path or
+    URL source) yields an empty version.
 
     The 'python' key is skipped (it is a Python version constraint, not a package dep).
     Line numbers are 1-based.
     """
     results: list[tuple[str, str, int]] = []
-    current_section = ""
+    section: list[str] = []
     lines = content.splitlines()
-    # [tool.poetry.dependencies.<name>] table being read: (name, line, version)
+    # [tool.poetry.dependencies.<name>] table being read: [name, line, version]
     table_dep: Optional[list] = None
     skip_through = -1
 
+    def add(pkg: str, value: object, lineno: int) -> None:
+        if pkg.lower() == "python":
+            return
+        for version in _poetry_versions(value):
+            results.append((pkg, version, lineno))
+
     def flush_table_dep() -> None:
         if table_dep is not None:
-            results.append((table_dep[0], table_dep[2], table_dep[1]))
+            add(table_dep[0], table_dep[2], table_dep[1])
 
     for idx, line in enumerate(lines):
         if idx <= skip_through:
@@ -520,72 +598,61 @@ def extract_poetry_dependencies(content: str) -> list[tuple[str, str, int]]:
         if section_match:
             flush_table_dep()
             table_dep = None
-            current_section = section_match.group(1).strip()
-            name = _poetry_table_dependency(current_section)
-            if name is not None and name.lower() != "python":
-                table_dep = [name, lineno, ""]
+            section = _split_key(section_match.group(1))
+            if len(section) >= 2 and _is_poetry_dep_section(".".join(section[:-1])):
+                table_dep = [section[-1], lineno, {}]
             continue
 
         # Skip blank lines and comments
         if not stripped or stripped.startswith("#"):
             continue
 
-        if table_dep is not None:
-            kv_match = _TOML_KV_RE.match(stripped)
-            if kv_match and kv_match.group(1).strip() == "version":
-                table_dep[2] = _extract_string_value(
-                    _strip_inline_comment(kv_match.group(2))
-                )
-            continue
-
-        if not _is_poetry_dep_section(current_section):
-            continue
-
         kv_match = _TOML_KV_RE.match(stripped)
         if not kv_match:
             continue
+        full = section + _split_key(kv_match.group(1))
+        value_start = len(line) - len(line.lstrip()) + kv_match.start(2)
 
-        pkg = kv_match.group(1).strip()
-        raw_value = kv_match.group(2).strip()
-
-        # Skip the 'python' key
-        if pkg.lower() == "python":
+        if table_dep is not None:
+            if full[-1] == "version":
+                table_dep[2] = {
+                    "version": _extract_string_value(
+                        _strip_inline_comment(kv_match.group(2))
+                    )
+                }
             continue
 
-        # Multiple constraints: [{ version = "^1.0", python = "<3.8" }, ...]
-        if raw_value.startswith("["):
-            text = "\n".join([raw_value] + lines[idx + 1 :])
-            try:
-                value, end = _parse_inline_value(text, 0)
-            except _InlineParseError:
-                results.append((pkg, "", lineno))
-                continue
-            skip_through = idx + text.count("\n", 0, end)
-            constraints = value if isinstance(value, list) else []
-            versions = [
-                c.get("version", "") if isinstance(c, dict) else "" for c in constraints
-            ]
-            for version in versions or [""]:
-                results.append(
-                    (pkg, version if isinstance(version, str) else "", lineno)
+        # Which dependency (or table of dependencies) does this key set?
+        if _is_poetry_dep_section(".".join(full[:-1])):
+            target: Optional[str] = full[-1]
+        elif _is_poetry_dep_section(".".join(full)):
+            target = None  # dependencies = { ... }
+        elif len(full) >= 3 and _is_poetry_dep_section(".".join(full[:-2])):
+            # dependencies.foo.version = "1.0"
+            if full[-1] == "version":
+                add(
+                    full[-2],
+                    _extract_string_value(_strip_inline_comment(kv_match.group(2))),
+                    lineno,
                 )
             continue
-
-        # Inline table: { version = "^2.3", ... }
-        if raw_value.startswith("{"):
-            it_match = _INLINE_TABLE_VERSION_RE.search(raw_value)
-            if it_match:
-                version = it_match.group(1)
-                results.append((pkg, version, lineno))
-            else:
-                # No version key — git/url dep, not content-addressed
-                results.append((pkg, "", lineno))
+        else:
             continue
 
-        # Simple string: "^2.28"
-        # Strip surrounding quotes
-        version = _extract_string_value(raw_value)
-        results.append((pkg, version, lineno))
+        raw_value = kv_match.group(2).strip()
+        if raw_value.startswith(("[", "{")):
+            try:
+                value, skip_through = _parse_value_at(lines, idx, value_start)
+            except _InlineParseError:
+                value = None  # unreadable: reported as having no version
+        else:
+            value = _extract_string_value(_strip_inline_comment(raw_value))
+
+        if target is not None:
+            add(target, value, lineno)
+        elif isinstance(value, dict):
+            for pkg, dep_value in value.items():
+                add(pkg, dep_value, lineno)
 
     flush_table_dep()
     return results
@@ -834,10 +901,10 @@ class PyprojectChecker(Checker):
                                 path=rel_path,
                                 line=0,
                                 message="lock files are stale: missing {} ({})".format(
-                                    "{} dependency".format(len(missing))
-                                    if len(missing) == 1
-                                    else "{} dependencies".format(len(missing)),
-                                    ", ".join(sorted(missing)),
+                                    "{} dependency".format(len(set(missing)))
+                                    if len(set(missing)) == 1
+                                    else "{} dependencies".format(len(set(missing))),
+                                    ", ".join(sorted(set(missing))),
                                 ),
                                 integrity=True,
                             )

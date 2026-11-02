@@ -1,0 +1,11 @@
+[[package]]
+name = "foo"
+version = "1.0.0"
+
+[[package]]
+name = "bar"
+version = "2.0.0"
+
+[[package]]
+name = "baz"
+version = "3.0.0"
