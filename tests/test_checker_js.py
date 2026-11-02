@@ -629,7 +629,8 @@ class TestPackageJsonEmptyLock:
         """A recognised but package-free lock still fails a required dependency."""
         findings = _run_with_lock("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
         assert [f.message for f in findings] == [
-            "pnpm-lock.yaml is stale: missing 1 dependency (left-pad)"
+            "pnpm-lock.yaml contains no packages (empty or unrecognised format)",
+            "pnpm-lock.yaml is stale: missing 1 dependency (left-pad)",
         ]
 
     def test_pnpm_real_layout_with_blank_lines(self):
@@ -762,7 +763,38 @@ class TestPackageJsonValidEmptyLock:
         lock = json.dumps({"lockfileVersion": 3, "packages": {"": {}}})
         findings = _run_with_lock("package-lock.json", lock)
         assert [f.message for f in findings] == [
-            "package-lock.json is stale: missing 1 dependency (left-pad)"
+            "package-lock.json contains no packages (empty or unrecognised format)",
+            "package-lock.json is stale: missing 1 dependency (left-pad)",
+        ]
+
+    def test_marker_only_lock_not_excused_by_another_lock(self):
+        """Codex #12 follow-up: yarn.lock covering `a` must not make a bare npm marker valid."""
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                json.dump({"dependencies": {"a": "1.0.0"}}, fh)
+            with open(os.path.join(d, "yarn.lock"), "w") as fh:
+                fh.write('a@1.0.0:\n  version "1.0.0"\n  integrity sha512-x\n')
+            with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                fh.write('{"lockfileVersion":3}')
+            index = {d: {"package.json", "package-lock.json", "yarn.lock"}}
+            findings = PackageJsonChecker().check(index, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [(f.path, f.message) for f in findings] == [
+            (
+                "package-lock.json",
+                "package-lock.json contains no packages (empty or unrecognised format)",
+            )
+        ]
+
+    def test_v3_lock_without_packages_is_unrecognised(self):
+        """npm v2+ locks always have "packages"; a bare marker is not one npm writes."""
+        findings = _run_with_lock(
+            "package-lock.json", '{"lockfileVersion":3}', {"a": "file:../a"}
+        )
+        assert [f.message for f in findings] == [
+            "package-lock.json contains no packages (empty or unrecognised format)"
         ]
 
     def test_pnpm_lock_with_only_local_links(self):

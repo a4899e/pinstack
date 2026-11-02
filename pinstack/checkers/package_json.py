@@ -142,9 +142,10 @@ _LOCAL_SPEC_PREFIXES = ("file:", "link:", "workspace:", "portal:", ".", "/", "~/
 def _js_lock_recognised(full_path: str, lock_filename: str) -> bool:
     """Return True if a lock file is in a format its package manager writes.
 
-    A recognised lock may legitimately list no packages (only local links,
+    A recognised lock may legitimately list no packages, but only when the
+    manifest declares nothing that needs a locked package (only local links,
     or only optional peers that were not installed). An empty or
-    unrecognised file may not.
+    unrecognised file never may.
     """
     lock_path = os.path.join(os.path.dirname(full_path), lock_filename)
     try:
@@ -157,7 +158,14 @@ def _js_lock_recognised(full_path: str, lock_filename: str) -> bool:
             data = json.loads(content)
         except (ValueError, TypeError):
             return False
-        return isinstance(data, dict) and isinstance(data.get("lockfileVersion"), int)
+        if not isinstance(data, dict):
+            return False
+        version = data.get("lockfileVersion")
+        if not isinstance(version, int):
+            return False
+        # From lockfileVersion 2 on, npm always writes "packages" with at
+        # least the root ("") entry.
+        return version < 2 or isinstance(data.get("packages"), dict)
     if lock_filename == "yarn.lock":
         return bool(_YARN_LOCK_MARKERS.search(content))
     return bool(_PNPM_LOCK_MARKER.search(content))
@@ -248,14 +256,25 @@ class PackageJsonChecker(Checker):
                 )
             elif has_deps and found_lock_files:
                 # Cross-reference: every manifest dep must appear in some lock
-                # file. Each lock that yields no packages and is not in a
-                # recognised format is reported, and the cross-reference still
-                # runs against the rest.
+                # file. A lock that yields no packages is reported unless it is
+                # in a recognised format and the manifest declares nothing that
+                # needs a locked package; another lock covering the deps does
+                # not excuse it. The cross-reference still runs against the
+                # rest.
+                needed = [
+                    pkg
+                    for section in _DEP_SECTIONS
+                    if isinstance(data.get(section), dict)
+                    for pkg, spec in sorted(data[section].items())
+                    if _needs_lock_entry(data, section, pkg, spec)
+                ]
                 lock_filenames = sorted(found_lock_files)
                 lock_names: set[str] = set()
                 for lock_filename in lock_filenames:
                     names = _extract_js_lock_names(full_path, lock_filename)
-                    if not names and not _js_lock_recognised(full_path, lock_filename):
+                    if not names and (
+                        needed or not _js_lock_recognised(full_path, lock_filename)
+                    ):
                         findings.append(
                             empty_lock_finding(
                                 self.name,
@@ -265,16 +284,7 @@ class PackageJsonChecker(Checker):
                             )
                         )
                     lock_names |= names
-                missing: list[str] = []
-                for section in _DEP_SECTIONS:
-                    deps = data.get(section)
-                    if not deps or not isinstance(deps, dict):
-                        continue
-                    for pkg in sorted(deps.keys()):
-                        if pkg in lock_names:
-                            continue
-                        if _needs_lock_entry(data, section, pkg, deps[pkg]):
-                            missing.append(pkg)
+                missing = [pkg for pkg in needed if pkg not in lock_names]
                 if missing:
                     findings.append(
                         Finding(
