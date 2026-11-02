@@ -348,3 +348,148 @@ class TestGradleMultipleConfigurations:
     def test_all_have_line_numbers(self):
         for f in self.findings:
             assert f.line > 0
+
+
+def _scan(subpath):
+    # type: (str) -> list
+    """Index a fixture tree the way the CLI does and run the checker over it."""
+    from pinstack.core import build_index
+
+    dirpath = os.path.join(GRADLE_FIXTURES, subpath)
+    index = build_index(dirpath, set(GradleChecker.patterns))
+    return [
+        (f.path.replace(os.sep, "/"), f.line, f.message)
+        for f in GradleChecker().check(index, dirpath)
+    ]
+
+
+def _decls(text):
+    # type: (str) -> list
+    from pinstack.checkers.gradle import _declarations
+
+    return [d[1:] for d in _declarations(text.splitlines(True))]
+
+
+class TestGradleModernBuild:
+    """Review repro M5: most of a modern build was invisible."""
+
+    def setup_method(self):
+        self.findings = _scan("modern_build")
+        self.by_line = {(p, n): m for p, n, m in self.findings}
+
+    def test_five_findings(self):
+        assert sorted(self.by_line) == [
+            ("build.gradle", 3),
+            ("build.gradle", 4),
+            ("build.gradle", 5),
+            ("build.gradle", 6),
+            ("deps.gradle", 1),
+        ], self.findings
+
+    def test_variable_reference(self):
+        assert "variable reference '$v'" in self.by_line[("build.gradle", 3)]
+
+    def test_snapshot(self):
+        assert "SNAPSHOT version '1.0-SNAPSHOT'" in self.by_line[("build.gradle", 4)]
+
+    def test_platform_wrapper(self):
+        assert (
+            "'org.foo:bom' uses dynamic version '1.+'"
+            in (self.by_line[("build.gradle", 5)])
+        )
+
+    def test_kotlin_named_arguments(self):
+        assert "'org.foo:lib3'" in self.by_line[("build.gradle", 6)]
+
+    def test_applied_script_checked(self):
+        """`apply from: "deps.gradle"` pulls in a script that is now indexed."""
+        assert "'org.foo:lib4'" in self.by_line[("deps.gradle", 1)]
+
+    def test_applied_script_needs_no_lockfile(self):
+        """The lockfile requirement is keyed on build.gradle(.kts) alone."""
+        assert not any("no gradle.lockfile" in m for _, _, m in self.findings)
+
+
+class TestGradleDeclarationForms:
+    def test_enforced_platform_and_parenthesised_wrapper(self):
+        assert _decls(
+            'implementation(enforcedPlatform("g:a:1.0"))\n'
+            'api platform("g:b:2.0")\n'
+            'testImplementation(testFixtures("g:c:3.0"))\n'
+        ) == [("g", "a", "1.0"), ("g", "b", "2.0"), ("g", "c", "3.0")]
+
+    def test_kotlin_template_not_split(self):
+        assert _decls('implementation("g:a:${v}")\n') == [("g", "a", "${v}")]
+
+    def test_several_declarations_on_one_line(self):
+        assert _decls('dependencies { implementation "g:a:1"; api "g:b:2" }\n') == [
+            ("g", "a", "1"),
+            ("g", "b", "2"),
+        ]
+
+    def test_commented_out_declaration_ignored(self):
+        assert (
+            _decls('// implementation "g:a:+"\ndependencies { // api "g:b:+"\n') == []
+        )
+
+    def test_map_notation_any_order_and_missing_version(self):
+        assert _decls(
+            "implementation version: '1', name: 'a', group: 'g'\n"
+            'compileOnly(name = "b", group = "g")\n'
+        ) == [("g", "a", "1"), ("g", "b", None)]
+
+    def test_classpath_configuration(self):
+        assert _decls('classpath "com.android.tools.build:gradle:8.+"\n') == [
+            ("com.android.tools.build", "gradle", "8.+")
+        ]
+
+    def test_bad_versions(self):
+        from pinstack.checkers.gradle import _is_bad_version
+
+        assert "variable" in _is_bad_version("${v}")
+        assert "SNAPSHOT" in _is_bad_version("1.0-snapshot")
+        assert _is_bad_version("1.0.0") == ""
+
+
+class TestGradleMapNotationLinearTime:
+    """Review L4: the map-notation regex was quadratic in line length."""
+
+    def test_long_line_parses_quickly(self):
+        import time
+
+        line = "implementation name: 'y' " + "group: 'g', " * 80000  # ~940 KB
+        start = time.perf_counter()
+        assert _decls(line) == [("g", "y", None)]
+        assert time.perf_counter() - start < 2.0
+
+
+class TestGradleVersionCatalog:
+    """Review M5f: gradle/libs.versions.toml was not read."""
+
+    def setup_method(self):
+        self.findings = _scan("catalog")
+
+    def test_findings(self):
+        assert [(n, m.split("'")[1]) for _, n, m in self.findings] == [
+            (3, "junit"),
+            (4, "dyn"),
+            (8, "lib5"),
+            (10, "lib7"),
+            (13, "p"),
+        ]
+        assert all(p == "gradle/libs.versions.toml" for p, _, _ in self.findings)
+
+    def test_messages(self):
+        by_line = {n: m for _, n, m in self.findings}
+        assert by_line[3] == (
+            "'junit' in [versions] uses version range '[4.0,5.0)'; pin to an exact version"
+        )
+        assert by_line[10] == (
+            "'lib7' in [libraries] has no version specified; pin to an exact version"
+        )
+
+    def test_version_ref_and_inline_pins_accepted(self):
+        """guava uses version.ref (checked in [versions]); lib6 is pinned inline."""
+        names = [m.split("'")[1] for _, _, m in self.findings]
+        assert "guava" not in names
+        assert "lib6" not in names

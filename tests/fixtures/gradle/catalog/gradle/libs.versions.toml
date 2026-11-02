@@ -1,0 +1,13 @@
+[versions]
+guava = "31.1-jre"
+junit = { strictly = "[4.0,5.0)" }
+dyn = "1.+"
+
+[libraries]
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+lib5 = "org.foo:lib5:1.+"
+lib6 = { group = "org.foo", name = "lib6", version = "1.0" }
+lib7 = { module = "org.foo:lib7" }
+
+[plugins]
+p = { id = "org.x", version = "latest.release" }

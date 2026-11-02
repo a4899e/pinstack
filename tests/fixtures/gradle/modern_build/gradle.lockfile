@@ -1,0 +1,5 @@
+org.foo:lib:1.0=compileClasspath
+org.foo:lib2:1.0-SNAPSHOT=compileClasspath
+org.foo:bom:1.0=compileClasspath
+org.foo:lib3:1.0=compileClasspath
+empty=
