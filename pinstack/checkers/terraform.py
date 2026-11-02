@@ -1,25 +1,108 @@
-"""Terraform checker: enforces h1: hashes in .terraform.lock.hcl provider blocks."""
+"""Terraform checker: requires .terraform.lock.hcl with h1: hashes for root modules.
+
+Two checks:
+
+1. Every provider block in a ``.terraform.lock.hcl`` must carry an ``h1:`` hash.
+2. A root module (a directory of ``*.tf`` files that is applied directly) must
+   have a ``.terraform.lock.hcl`` beside it, or ``terraform init`` resolves
+   provider versions and checksums afresh on every run.
+
+Only root modules get a lock file; a child module's providers are locked by
+the root that calls it. A directory counts as a root module when one of its
+``.tf`` files declares or configures providers (``required_providers {``,
+``provider "x" {``) or state (``backend "x" {``, ``cloud {``), unless another
+scanned ``.tf`` file calls it as a local module (``source = "./..."`` or
+``"../..."``). That exemption covers ``modules/`` subdirectories and, in the
+standard module layout, a reusable module's root called from ``examples/``.
+
+Source: https://developer.hashicorp.com/terraform/language/files/dependency-lock
+"""
 
 from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from typing import Optional
 
 from pinstack.core import Checker, Finding, FileIndex
+
+_LOCK_FILE = ".terraform.lock.hcl"
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_ROOT_SIGNAL_RE = re.compile(
+    r'^[ \t]*(?:required_providers|provider[ \t]+"[^"]+"|backend[ \t]+"[^"]+"|cloud)'
+    r"[ \t]*\{",
+    re.M,
+)
+_LOCAL_SOURCE_RE = re.compile(r'^[ \t]*source[ \t]*=[ \t]*"(\.\.?/[^"]*)"', re.M)
+
+
+def _read_tf(path: str) -> str:
+    """Return a .tf file's text with comments removed, or "" if unreadable."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return ""
+    # Blank out block comments line-for-line so line numbers still hold.
+    content = _BLOCK_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), content)
+    lines = []
+    for line in content.split("\n"):
+        stripped = line.lstrip()
+        lines.append("" if stripped.startswith(("#", "//")) else line)
+    return "\n".join(lines)
 
 
 class TerraformChecker(Checker):
     name = "terraform"
     description = "Checks .terraform.lock.hcl for provider blocks missing h1: hashes"
-    patterns: list[str] = [".terraform.lock.hcl"]
+    patterns: list[str] = [_LOCK_FILE, "*.tf"]
+
+    def _check_root_modules(self, index: FileIndex, root: str) -> list[Finding]:
+        """Report root-module directories with no .terraform.lock.hcl."""
+        # 1. Find each directory's first root-module signal and every local
+        #    module it calls.
+        signals: dict[str, tuple[str, int]] = {}  # dir -> (file, line)
+        called: set[str] = set()
+        for dir_path in sorted(index.keys()):
+            for fname in sorted(index[dir_path]):
+                if not fname.endswith(".tf"):
+                    continue
+                content = _read_tf(os.path.join(dir_path, fname))
+                m = _ROOT_SIGNAL_RE.search(content)
+                if m and dir_path not in signals:
+                    lineno = content.count("\n", 0, m.start()) + 1
+                    signals[dir_path] = (fname, lineno)
+                for source in _LOCAL_SOURCE_RE.findall(content):
+                    called.add(os.path.normpath(os.path.join(dir_path, source)))
+
+        # 2. A root module without a lock file is a finding.
+        findings: list[Finding] = []
+        for dir_path, (fname, lineno) in sorted(signals.items()):
+            if _LOCK_FILE in index[dir_path]:
+                continue
+            if os.path.normpath(dir_path) in called:
+                continue
+            findings.append(
+                Finding(
+                    checker=self.name,
+                    path=os.path.relpath(os.path.join(dir_path, fname), root),
+                    line=lineno,
+                    message=(
+                        "Terraform root module has no .terraform.lock.hcl; run"
+                        " 'terraform init' and commit the lock file"
+                    ),
+                    integrity=True,
+                )
+            )
+        return findings
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
-        findings: list[Finding] = []
+        findings: list[Finding] = self._check_root_modules(index, root)
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
-                if not fnmatch.fnmatch(fname, ".terraform.lock.hcl"):
+                if not fnmatch.fnmatch(fname, _LOCK_FILE):
                     continue
 
                 full_path = os.path.join(dir_path, fname)

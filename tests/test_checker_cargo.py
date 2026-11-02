@@ -84,3 +84,37 @@ class TestCargoGitSource:
 class TestCargoNoLock:
     def test_no_cargo_lock_no_findings(self):
         assert _check_empty() == []
+
+
+def _scan(subpath):
+    # type: (str) -> list
+    """Index a fixture tree the way the CLI does and run the checker over it."""
+    from pinstack.core import build_index
+
+    dirpath = os.path.join(CARGO_FIXTURES, subpath)
+    index = build_index(dirpath, set(CargoChecker.patterns))
+    return CargoChecker().check(index, dirpath)
+
+
+class TestCargoMissingLock:
+    """Review repro M3: Cargo.toml with dependencies and no Cargo.lock."""
+
+    def test_manifest_without_lock_flagged(self):
+        findings = _scan("no_lock")
+        assert len(findings) == 1
+        assert findings[0].path == "Cargo.toml"
+        assert "no Cargo.lock" in findings[0].message
+        assert findings[0].integrity
+
+    def test_manifest_without_deps_not_flagged(self):
+        """Nothing to resolve, so nothing to lock."""
+        assert _scan("no_deps_no_lock") == []
+
+    def test_workspace_member_uses_root_lock(self):
+        """A member's Cargo.toml is locked by the workspace root's Cargo.lock."""
+        assert _scan("workspace") == []
+
+    def test_member_scanned_alone_flagged(self):
+        """The ancestor search stops at the scan root."""
+        findings = _scan(os.path.join("workspace", "crates", "member"))
+        assert [f.path for f in findings] == ["Cargo.toml"]

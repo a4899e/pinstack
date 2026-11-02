@@ -80,3 +80,43 @@ class TestTerraformMultiProvider:
     def test_random_not_flagged(self):
         messages = [f.message for f in self.findings]
         assert not any("random" in m for m in messages)
+
+
+def _scan(subpath):
+    # type: (str) -> list
+    """Index a fixture tree the way the CLI does and run the checker over it."""
+    from pinstack.core import build_index
+
+    dirpath = os.path.join(TERRAFORM_FIXTURES, subpath)
+    index = build_index(dirpath, set(TerraformChecker.patterns))
+    return TerraformChecker().check(index, dirpath)
+
+
+class TestTerraformMissingLock:
+    """Review repro M3: a root module with no .terraform.lock.hcl."""
+
+    def test_required_providers_without_lock_flagged(self):
+        findings = _scan("no_lock")
+        assert len(findings) == 1
+        assert findings[0].path == "main.tf"
+        assert findings[0].line == 2
+        assert "no .terraform.lock.hcl" in findings[0].message
+        assert findings[0].integrity
+
+    def test_locally_called_child_module_not_flagged(self):
+        """modules/vpc is locked by the root that calls it with source = "./modules/vpc"."""
+        assert _scan("with_modules") == []
+
+    def test_module_repo_root_called_from_examples_not_flagged(self):
+        """Standard module layout: examples/basic calls the root with source = "../../"."""
+        assert _scan("module_repo") == []
+
+    def test_commented_out_blocks_ignored(self):
+        assert _scan("commented") == []
+
+    def test_existing_lock_fixtures_unchanged(self):
+        """Lock-only directories have no .tf files, so no new findings."""
+        assert _scan("good") == []
+
+    def test_tf_pattern_indexed(self):
+        assert "*.tf" in TerraformChecker.patterns

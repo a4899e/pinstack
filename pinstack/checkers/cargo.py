@@ -60,10 +60,46 @@ def _parse_cargo_lock_names(lines: list[str]) -> set[str]:
     return names
 
 
+def _ancestor_has_lock(dir_path: str, root: str) -> bool:
+    """Return True if a directory above ``dir_path``, up to ``root``, has a Cargo.lock.
+
+    Workspace members share the workspace root's Cargo.lock, so a member's
+    own directory has none.
+    """
+    root = os.path.abspath(root)
+    current = os.path.abspath(dir_path)
+    while current != root:
+        parent = os.path.dirname(current)
+        if parent == current or os.path.commonpath([root, parent]) != root:
+            return False
+        current = parent
+        if os.path.isfile(os.path.join(current, "Cargo.lock")):
+            return True
+    return False
+
+
 class CargoChecker(Checker):
     name = "cargo"
     description = "Checks Cargo.lock for missing checksums on registry packages"
     patterns: list[str] = ["Cargo.lock", "Cargo.toml"]
+
+    def _check_lock_present(self, dir_path: str, root: str) -> Optional[Finding]:
+        """Report a Cargo.toml with dependencies and no Cargo.lock to resolve them."""
+        toml_path = os.path.join(dir_path, "Cargo.toml")
+        if not _parse_cargo_toml_deps(toml_path):
+            return None
+        if _ancestor_has_lock(dir_path, root):
+            return None
+        return Finding(
+            checker=self.name,
+            path=os.path.relpath(toml_path, root),
+            line=0,
+            message=(
+                "Cargo.toml has dependencies but no Cargo.lock here or in a parent"
+                " workspace; run 'cargo generate-lockfile' and commit Cargo.lock"
+            ),
+            integrity=True,
+        )
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
@@ -72,6 +108,10 @@ class CargoChecker(Checker):
             files = index[dir_path]
 
             if "Cargo.lock" not in files:
+                if "Cargo.toml" in files:
+                    finding = self._check_lock_present(dir_path, root)
+                    if finding:
+                        findings.append(finding)
                 continue
 
             lock_path = os.path.join(dir_path, "Cargo.lock")
