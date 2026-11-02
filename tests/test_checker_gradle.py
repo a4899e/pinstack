@@ -542,7 +542,9 @@ class TestGradleReviewFollowUps:
             with open(os.path.join(d, "gradle.lockfile"), "w") as fh:
                 fh.write("g:a:1.0=compileClasspath\n")
             index = {d: {"build.gradle", "gradle.lockfile"}}
-            assert GradleChecker().check(index, d) == []
+            (missing,) = GradleChecker().check(index, d)
+            assert missing.path == "build.gradle"
+            assert "no buildscript-gradle.lockfile" in missing.message
 
             with open(os.path.join(d, "buildscript-gradle.lockfile"), "w") as fh:
                 fh.write("other:x:1.0=classpath\n")
@@ -595,3 +597,56 @@ class TestGradleCatalogForms:
             "[plugins.p]\n"
             'id = "x"\n'
         ) == [(1, "tbl"), (7, "rich"), (9, "p")]
+
+
+class TestGradleCodexFollowUps:
+    """Codex review of #15."""
+
+    def _catalog(self, text):
+        # type: (str) -> list
+        return TestGradleCatalogForms()._catalog(text)
+
+    def test_catalog_comment_cannot_suppress_a_version(self):
+        assert self._catalog(
+            '[libraries]\nfoo = { module = "g:a", version = "+" } # version.ref = "unused"\n'
+        ) == [(2, "foo")]
+
+    def test_catalog_subtable_comment_cannot_suppress_a_version(self):
+        assert self._catalog(
+            '[libraries.foo]\nmodule = "g:a"\nversion = "+"  # version.ref = "x"\n'
+        ) == [(1, "foo")]
+
+    def test_nested_rich_version_table(self):
+        assert (
+            self._catalog(
+                '[libraries.foo]\nmodule = "g:a"\n[libraries.foo.version]\nstrictly = "1.0"\n'
+            )
+            == []
+        )
+        assert self._catalog(
+            '[libraries.foo]\nmodule = "g:a"\n[libraries.foo.version]\nstrictly = "[1,2)"\n'
+        ) == [(1, "foo")]
+        assert (
+            self._catalog(
+                '[libraries.foo]\nmodule = "g:a"\n[libraries.foo.version]\nref = "x"\n'
+            )
+            == []
+        )
+
+    def test_multiline_kotlin_named_arguments(self):
+        assert _decls(
+            "dependencies {\n"
+            "    implementation(\n"
+            '        group = "g",\n'
+            '        name = "a",\n'
+            '        version = "1.+"\n'
+            "    )\n"
+            '    api("g:b:1.0")\n'
+            "}\n"
+        ) == [("g", "a", "1.+"), ("g", "b", "1.0")]
+
+    def test_multiline_call_keeps_first_line_number(self):
+        from pinstack.checkers.gradle import _declarations
+
+        text = 'implementation(\n  "g:a:+"\n)\n'
+        assert [d[0] for d in _declarations(text.splitlines(True))] == [1]

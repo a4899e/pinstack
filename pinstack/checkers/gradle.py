@@ -149,6 +149,50 @@ _EXTRA_COORD_RE = re.compile(
 )
 
 
+def _paren_depth(text: str) -> int:
+    """Return the net number of ``(`` opened outside string literals."""
+    depth = 0
+    quote = ""
+    for ch in text:
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+    return depth
+
+
+# A call left open longer than this is not a declaration being read.
+_MAX_CALL_LINES = 50
+
+
+def _join_open_calls(code_lines: list[str]) -> list[tuple[int, str]]:
+    """Join a call that spans lines into one line, keeping its first line number.
+
+    implementation(
+        group = "g",
+        name = "a",
+        version = "1.+",
+    )
+    """
+    joined: list[tuple[int, str]] = []
+    i = 0
+    while i < len(code_lines):
+        start, text = i + 1, code_lines[i]
+        depth = _paren_depth(text)
+        i += 1
+        while depth > 0 and i < len(code_lines) and i - start < _MAX_CALL_LINES:
+            text += " " + code_lines[i].strip()
+            depth += _paren_depth(code_lines[i])
+            i += 1
+        joined.append((start, text))
+    return joined
+
+
 def _declarations(
     lines: list[str],
 ) -> list[tuple[int, str, str, str, Optional[str]]]:
@@ -159,7 +203,7 @@ def _declarations(
     """
     found: list[tuple[int, str, str, str, Optional[str]]] = []
     code_lines = _strip_comments("".join(lines)).split("\n")
-    for lineno, code in enumerate(code_lines, start=1):
+    for lineno, code in _join_open_calls(code_lines):
         for statement in _split_statements(code):
             m = _DEP_RE.match(statement)
             if m:
@@ -278,6 +322,28 @@ def _catalog_entry_versions(section: str, value: str) -> Optional[list[str]]:
     return None
 
 
+def _strip_toml_comment(line: str) -> str:
+    """Remove a ``#`` comment that is outside TOML strings."""
+    quote = ""
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#":
+            return line[:i] + "\n"
+    return line
+
+
+def _close_entry(entry: list) -> tuple[str, str, int, str]:
+    """Turn an accumulated [libraries.foo] table into an inline-table entry."""
+    alias, section, lineno, text = entry
+    if text.count("{") > text.count("}"):
+        text += "}"
+    return alias, section, lineno, "{ " + text + "}"
+
+
 def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
     """Check a Gradle version catalog (libs.versions.toml).
 
@@ -296,33 +362,44 @@ def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
     except OSError:
         return []
 
-    # 1. Collect (alias, section, line, value text) for every entry.
+    # 1. Collect (alias, section, line, value text) for every entry. An
+    #    entry may be a table of its own ([libraries.foo]) with a nested
+    #    [libraries.foo.version] table, which belongs to the same entry.
     entries: list[tuple[str, str, int, str]] = []
     section = ""
-    table_entry: Optional[list] = None  # [alias, section, line, text] for [libraries.x]
+    table_entry: Optional[list] = None  # [alias, section, line, text]
     for lineno, raw in enumerate(lines, start=1):
-        if raw.lstrip().startswith("#"):
+        line = _strip_toml_comment(raw)
+        if not line.strip():
             continue
-        m = _CATALOG_SECTION_RE.match(raw)
+        m = _CATALOG_SECTION_RE.match(line)
         if m:
-            if table_entry is not None:
-                entries.append(tuple(table_entry))  # type: ignore[arg-type]
-                table_entry = None
             section = m.group(1).strip()
-            parent, _, alias = section.partition(".")
-            if parent in _CATALOG_SECTIONS and alias:
-                table_entry = [alias.strip("\"'"), parent, lineno, "\n"]
+            parts = [p.strip().strip("\"'") for p in section.split(".")]
+            if (
+                table_entry is not None
+                and len(parts) == 3
+                and [parts[0], parts[1]] == [table_entry[1], table_entry[0]]
+                and parts[2] == "version"
+            ):
+                table_entry[3] += "version = {"
+                continue
+            if table_entry is not None:
+                entries.append(_close_entry(table_entry))
+                table_entry = None
+            if len(parts) == 2 and parts[0] in _CATALOG_SECTIONS:
+                table_entry = [parts[1], parts[0], lineno, ""]
             continue
         if table_entry is not None:
-            table_entry[3] += raw
+            table_entry[3] += line.strip() + " "
             continue
         if section not in _CATALOG_SECTIONS:
             continue
-        m = _CATALOG_ENTRY_RE.match(raw)
+        m = _CATALOG_ENTRY_RE.match(line)
         if m:
             entries.append((m.group(1), section, lineno, m.group(2)))
     if table_entry is not None:
-        entries.append(tuple(table_entry))  # type: ignore[arg-type]
+        entries.append(_close_entry(table_entry))
 
     # 2. Check each declared version.
     findings: list[Finding] = []
@@ -424,20 +501,51 @@ class GradleChecker(Checker):
                     os.path.join(dir_path, _BUILDSCRIPT_LOCKFILE)
                 )
 
-            # Check dependency versions in each script. Missing coordinates
-            # are kept per lockfile: [gradle.lockfile, buildscript lockfile].
-            missing_from_lock: tuple[list[str], list[str]] = ([], [])
+            declarations: list[tuple[str, list]] = []
             for fname in scripts:
-                full_path = os.path.join(dir_path, fname)
-                rel_path = os.path.relpath(full_path, root)
-
                 try:
-                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                        lines = fh.readlines()
+                    with open(
+                        os.path.join(dir_path, fname),
+                        "r",
+                        encoding="utf-8",
+                        errors="replace",
+                    ) as fh:
+                        declarations.append((fname, _declarations(fh.readlines())))
                 except OSError:
                     continue
 
-                for lineno, config, group, artifact, version in _declarations(lines):
+            # The buildscript classpath is locked in its own file.
+            classpath_in = [
+                fname
+                for fname, decls in declarations
+                if fname in _BUILD_FILES and any(d[1] == "classpath" for d in decls)
+            ]
+            if classpath_in and not has_buildscript_lock:
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=os.path.relpath(
+                            os.path.join(dir_path, classpath_in[0]), root
+                        ),
+                        line=0,
+                        message=(
+                            "{} declares buildscript classpath dependencies but has"
+                            " no {}; enable dependency locking for the buildscript"
+                            " classpath and run 'gradle dependencies --write-locks'".format(
+                                classpath_in[0], _BUILDSCRIPT_LOCKFILE
+                            )
+                        ),
+                        integrity=True,
+                    )
+                )
+
+            # Check dependency versions in each script. Missing coordinates
+            # are kept per lockfile: [gradle.lockfile, buildscript lockfile].
+            missing_from_lock: tuple[list[str], list[str]] = ([], [])
+            for fname, decls in declarations:
+                rel_path = os.path.relpath(os.path.join(dir_path, fname), root)
+
+                for lineno, config, group, artifact, version in decls:
                     coord = "{}:{}".format(group, artifact)
                     # Gradle locks the buildscript classpath separately.
                     if config == "classpath":
