@@ -1,28 +1,43 @@
 """Dockerfile checker: enforces digest pinning on every image a Dockerfile pulls.
 
-Images are pulled by three instructions:
+Images are pulled from four places:
 
+- the ``# syntax=<image>`` parser directive (the BuildKit frontend)
 - ``FROM <image> [AS <name>]``
-- ``COPY --from=<image>`` (and ``ADD --from=``)
+- ``COPY --from=<image>`` and ``ADD --from=<image>``
 - ``RUN --mount=...,from=<image>``
 
-In each position the reference may instead name a build stage declared by an
-earlier ``FROM ... AS <name>`` (or, for ``--from``, a stage's numeric index).
-Only those are skipped. A bare word that is not a declared stage, such as
-``alpine``, is an image pulled from Docker Hub at ``:latest``.
+``ONBUILD`` instructions are checked too, since they run in every downstream
+build.
+
+Outside the directive, the reference may instead name a build stage declared
+by an earlier ``FROM ... AS <name>`` (or, for ``--from``, a stage's numeric
+index). Only those are skipped. A bare word that is not a declared stage, such
+as ``alpine``, is an image pulled from Docker Hub at ``:latest``.
 
 A reference containing ``$`` is expanded from ``ARG`` values that
 ``--build-arg`` can override at build time, so the Dockerfile alone cannot show
 which image is pulled. Those references are reported rather than trusted.
 
-Instructions are read as logical lines: a trailing escape character (``\\`` by
-default, or the character set by a ``# escape=`` parser directive) continues
-the instruction onto the next line, and comment lines inside a continuation
-are dropped, matching the Dockerfile reference.
+The file is split into instructions the way BuildKit's parser does it:
+
+1. Parser directives are read only from the leading comment lines. Only
+   ``syntax``, ``escape`` and ``check`` are directives; an unknown one is a
+   comment and ends directive parsing, as does a blank line or an instruction.
+2. A line ending in the escape character (``\\`` unless ``# escape=`` says
+   otherwise, optionally followed by spaces) continues onto the next line. The
+   escape is removed and the next line is appended as-is, without a separator,
+   so ``FROM alp\\`` + ``ine`` is ``FROM alpine``. Comment lines and blank lines
+   inside a continuation are dropped.
+3. ``RUN``, ``COPY`` and ``ADD`` may open heredocs (``<<EOF``, ``<<-"EOF"``);
+   the body lines up to each delimiter are content, not instructions.
+
+Source: https://docs.docker.com/reference/dockerfile/
 """
 
 from __future__ import annotations
 
+import csv
 import fnmatch
 import os
 import re
@@ -30,75 +45,123 @@ from typing import Optional
 
 from pinstack.core import Checker, Finding, FileIndex
 
-# Parser directives must appear before any other content; only `escape` affects
-# how instructions are split into logical lines.
-_ESCAPE_DIRECTIVE_RE = re.compile(r"^#\s*escape\s*=\s*([\\`])\s*$", re.IGNORECASE)
-_DIRECTIVE_RE = re.compile(r"^#\s*[a-zA-Z][a-zA-Z0-9_-]*\s*=")
+_KNOWN_DIRECTIVES = frozenset(["syntax", "escape", "check"])
+_DIRECTIVE_RE = re.compile(r"^#\s*([a-zA-Z][a-zA-Z0-9_-]*)\s*=\s*(.*?)\s*$")
 
 # FROM [--flag=value ...] <image> [AS <name>]
 _FROM_RE = re.compile(
     r"^FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$",
     re.IGNORECASE,
 )
+_ONBUILD_RE = re.compile(r"^ONBUILD\s+", re.IGNORECASE)
 # Instruction keyword followed by its leading ``--flag[=value]`` tokens. Flags
 # precede the instruction's arguments, so a ``--from=`` or ``--mount=`` inside a
 # RUN shell command or a COPY source path is not mistaken for one.
 _FLAGS_RE = re.compile(r"^(COPY|ADD|RUN)((?:\s+--\S+)*)", re.IGNORECASE)
+_HEREDOC_INSTRUCTION_RE = re.compile(r"^(?:RUN|COPY|ADD)\s", re.IGNORECASE)
+_HEREDOC_RE = re.compile(r"<<(-?)([\"']?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
-def _read_logical_lines(lines: list[str]) -> list[tuple[int, str]]:
-    """Join continuation lines into logical instructions.
+def _read_directives(lines: list[str]) -> dict[str, tuple[int, str]]:
+    """Return the parser directives at the top of the file.
 
     :param lines: Raw file lines.
-    :returns: ``(start_lineno, text)`` for every non-blank, non-comment
-        logical line, with continuation escapes removed.
+    :returns: Lower-cased directive name -> ``(lineno, value)``. Only the
+        first occurrence of each directive is kept.
     """
-    escape = "\\"
-    # 1. Read parser directives at the top of the file.
-    for raw in lines:
-        stripped = raw.strip()
-        m = _ESCAPE_DIRECTIVE_RE.match(stripped)
-        if m:
-            escape = m.group(1)
-            continue
-        if _DIRECTIVE_RE.match(stripped):
-            continue
-        break
-
-    # 2. Join lines that end with the escape character.
-    logical: list[tuple[int, str]] = []
-    parts: list[str] = []
-    start = 0
+    directives: dict[str, tuple[int, str]] = {}
     for lineno, raw in enumerate(lines, start=1):
-        stripped = raw.strip()
-        if parts and (not stripped or stripped.startswith("#")):
-            # Blank and comment lines inside a continuation are dropped.
+        m = _DIRECTIVE_RE.match(raw.strip())
+        if not m or m.group(1).lower() not in _KNOWN_DIRECTIVES:
+            break
+        directives.setdefault(m.group(1).lower(), (lineno, m.group(2)))
+    return directives
+
+
+def _read_instructions(lines: list[str], escape: str) -> list[tuple[int, str]]:
+    """Join continuation lines into instructions, skipping heredoc bodies.
+
+    :param lines: Raw file lines.
+    :param escape: The continuation character, ``\\`` or a backtick.
+    :returns: ``(start_lineno, text)`` for every instruction.
+    """
+    continuation_re = re.compile(re.escape(escape) + r"[ \t]*$")
+    instructions: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        # 1. Find the first line of the next instruction.
+        first = lines[i].rstrip("\r\n").lstrip()
+        start = i + 1
+        i += 1
+        if not first.strip() or first.startswith("#"):
             continue
-        if not parts:
-            if not stripped or stripped.startswith("#"):
+
+        # 2. Append continuation lines as-is, without a separator.
+        text, continued = continuation_re.subn("", first)
+        while continued and i < len(lines):
+            raw = lines[i].rstrip("\r\n")
+            i += 1
+            if not raw.strip() or raw.lstrip().startswith("#"):
                 continue
-            start = lineno
-        if stripped.endswith(escape):
-            parts.append(stripped[: -len(escape)].strip())
+            part, continued = continuation_re.subn("", raw)
+            text += part
+        text = text.strip()
+        instructions.append((start, text))
+
+        # 3. Skip the bodies of any heredocs this instruction opens.
+        body = _ONBUILD_RE.sub("", text)
+        if not _HEREDOC_INSTRUCTION_RE.match(body):
             continue
-        parts.append(stripped)
-        logical.append((start, " ".join(p for p in parts if p)))
-        parts = []
-    if parts:
-        logical.append((start, " ".join(p for p in parts if p)))
-    return logical
+        for strip_tabs, _, delimiter in _HEREDOC_RE.findall(body):
+            while i < len(lines):
+                raw = lines[i].rstrip("\r\n")
+                i += 1
+                if (raw.lstrip("\t") if strip_tabs else raw) == delimiter:
+                    break
+    return instructions
 
 
 def _mount_from(option_list: str) -> Optional[str]:
     """Return the ``from=`` value of a ``--mount`` option list, if any.
 
+    BuildKit reads the option list as one CSV record, so a field may be
+    quoted (``"from=python:3.11"``).
+
     :param option_list: The text after ``--mount=``, e.g.
         ``type=bind,from=python:3.11,target=/src``.
     """
-    for field in option_list.split(","):
-        key, sep, value = field.partition("=")
-        if sep and key.strip().lower() == "from":
-            return value.strip().strip("\"'")
+    for record in csv.reader([option_list]):
+        for field in record:
+            key, sep, value = field.partition("=")
+            if sep and key.strip().lower() == "from":
+                return value.strip()
+    return None
+
+
+def _reference_problem(
+    image: str, stages: set[str], allow_stage_refs: bool, allow_index: bool
+) -> Optional[str]:
+    """Return why an image reference is not pinned, or None when it is.
+
+    :param stages: Lower-cased stage names declared so far in this file.
+    :param allow_stage_refs: Whether a bare stage name or ``scratch`` may
+        stand in for an image (false for the ``# syntax=`` directive).
+    :param allow_index: Whether a bare integer names a stage by index
+        (true for ``--from=``, not for ``FROM``).
+    """
+    if allow_stage_refs:
+        lowered = image.lower()
+        if lowered == "scratch" or lowered in stages:
+            return None
+        if allow_index and image.isdigit():
+            return None
+    if "$" in image:
+        return (
+            "uses a variable reference which cannot be verified;"
+            " write the image reference with an @sha256: digest"
+        )
+    if "@sha256:" not in image:
+        return "is not pinned with @sha256: digest"
     return None
 
 
@@ -112,65 +175,44 @@ class DockerfileChecker(Checker):
         "*.Dockerfile",
     ]
 
-    def _image_finding(
-        self, rel_path: str, lineno: int, label: str, image: str
-    ) -> Finding:
-        """Build the finding for an unpinned or unverifiable image reference."""
-        if "$" in image:
-            message = (
-                "{} '{}' uses a variable reference which cannot be verified;"
-                " write the image reference with an @sha256: digest".format(
-                    label, image
-                )
-            )
-        else:
-            message = "{} '{}' is not pinned with @sha256: digest".format(label, image)
-        return Finding(
-            checker=self.name,
-            path=rel_path,
-            line=lineno,
-            message=message,
-            integrity=True,
-        )
-
-    def _check_reference(
-        self,
-        rel_path: str,
-        lineno: int,
-        label: str,
-        image: str,
-        stages: set[str],
-        allow_index: bool,
-    ) -> Optional[Finding]:
-        """Check one image reference; return a finding or None when acceptable.
-
-        :param label: Instruction text used in the message, e.g. ``FROM``.
-        :param stages: Lower-cased stage names declared so far in this file.
-        :param allow_index: Whether a bare integer names a stage by index
-            (true for ``--from=``, not for ``FROM``).
-        """
-        lowered = image.lower()
-        if lowered == "scratch" or lowered in stages:
-            return None
-        if allow_index and image.isdigit():
-            return None
-        if "$" in image or "@sha256:" not in image:
-            return self._image_finding(rel_path, lineno, label, image)
-        return None
-
     def _check_file(self, rel_path: str, lines: list[str]) -> list[Finding]:
         findings: list[Finding] = []
         stages: set[str] = set()
 
-        for lineno, text in _read_logical_lines(lines):
+        def check(
+            lineno: int,
+            label: str,
+            image: str,
+            allow_stage_refs: bool = True,
+            allow_index: bool = True,
+        ) -> None:
+            problem = _reference_problem(image, stages, allow_stage_refs, allow_index)
+            if problem:
+                findings.append(
+                    Finding(
+                        checker=self.name,
+                        path=rel_path,
+                        line=lineno,
+                        message="{} '{}' {}".format(label, image, problem),
+                        integrity=True,
+                    )
+                )
+
+        directives = _read_directives(lines)
+        if "syntax" in directives:
+            lineno, image = directives["syntax"]
+            check(lineno, "# syntax", image, allow_stage_refs=False)
+        escape = directives.get("escape", (0, "\\"))[1]
+        if escape not in ("\\", "`"):
+            escape = "\\"
+
+        for lineno, text in _read_instructions(lines, escape):
+            text = _ONBUILD_RE.sub("", text)
+
             m = _FROM_RE.match(text)
             if m:
                 image, alias = m.group(1), m.group(2)
-                finding = self._check_reference(
-                    rel_path, lineno, "FROM", image, stages, allow_index=False
-                )
-                if finding:
-                    findings.append(finding)
+                check(lineno, "FROM", image, allow_index=False)
                 # The alias is visible only to instructions after this FROM.
                 if alias:
                     stages.add(alias.lower())
@@ -191,13 +233,8 @@ class DockerfileChecker(Checker):
                     label = "RUN --mount from"
                 else:
                     continue
-                if not ref:
-                    continue
-                finding = self._check_reference(
-                    rel_path, lineno, label, ref, stages, allow_index=True
-                )
-                if finding:
-                    findings.append(finding)
+                if ref:
+                    check(lineno, label, ref)
 
         return findings
 
@@ -212,8 +249,12 @@ class DockerfileChecker(Checker):
                 full_path = os.path.join(dir_path, fname)
                 rel_path = os.path.relpath(full_path, root)
 
+                # utf-8-sig drops a leading byte-order mark, as Docker does;
+                # left in place it would hide a FROM or directive on line 1.
                 try:
-                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    with open(
+                        full_path, "r", encoding="utf-8-sig", errors="replace"
+                    ) as fh:
                         lines = fh.readlines()
                 except OSError:
                     continue

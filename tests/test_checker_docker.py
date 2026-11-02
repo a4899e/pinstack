@@ -205,6 +205,14 @@ class TestDockerfileRunMount:
         )
         assert findings == []
 
+    def test_mount_quoted_csv_field(self):
+        """BuildKit reads --mount options as CSV, so a field may be quoted."""
+        findings = _run_dockerfile(
+            'FROM scratch\nRUN --mount=type=bind,"from=python:3.11",target=/x ls\n'
+        )
+        assert len(findings) == 1
+        assert "'python:3.11'" in findings[0].message
+
     def test_mount_in_shell_command_ignored(self):
         """A --mount inside the RUN command text is not a Dockerfile mount."""
         findings = _run_dockerfile(
@@ -232,6 +240,101 @@ class TestDockerfileContinuation:
         assert _run_dockerfile("FROM scratch\n") == []
 
 
+class TestDockerfileBuildKitParsing:
+    """The instruction splitter must agree with BuildKit, or an image hides."""
+
+    def test_image_name_split_across_lines(self):
+        """BuildKit appends the continuation as-is: `alp\\` + `ine` is `alpine`."""
+        findings = _run_dockerfile("FROM alp\\\nine\n")
+        assert len(findings) == 1
+        assert "'alpine'" in findings[0].message
+
+    def test_unknown_directive_ends_directive_parsing(self):
+        """After an unknown `# key=value`, a later `# escape=` is only a comment."""
+        findings = _run_dockerfile("# foo=bar\n# escape=`\nRUN echo `\nFROM alpine\n")
+        assert [f.line for f in findings] == [4]
+
+    def test_blank_line_ends_directive_parsing(self):
+        findings = _run_dockerfile("\n# escape=`\nRUN echo `\nFROM alpine\n")
+        assert [f.line for f in findings] == [4]
+
+    def test_byte_order_mark_stripped(self):
+        """A UTF-8 BOM must not hide a FROM on line 1."""
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "Dockerfile"), "wb") as fh:
+                fh.write(b"\xef\xbb\xbfFROM alpine\n")
+            findings = DockerfileChecker().check({d: {"Dockerfile"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert len(findings) == 1
+        assert "'alpine'" in findings[0].message
+
+    def test_heredoc_body_is_not_instructions(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nCOPY <<EOF /inner/Dockerfile\nFROM alpine\nEOF\n"
+        )
+        assert findings == []
+
+    def test_instructions_after_heredoc_checked(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nRUN <<EOF\necho hi\nEOF\nFROM alpine\n"
+        )
+        assert [f.line for f in findings] == [5]
+
+    def test_multiple_and_dash_heredocs(self):
+        """`<<-` strips leading tabs from the delimiter line; bodies are consumed in order."""
+        findings = _run_dockerfile(
+            'FROM scratch\nCOPY <<-"A" <<B /x/\nFROM a\n\tA\nFROM b\nB\nFROM alpine\n'
+        )
+        assert [f.line for f in findings] == [7]
+
+
+class TestDockerfileSyntaxDirective:
+    def test_unpinned_frontend_flagged(self):
+        """`# syntax=` pulls and runs a BuildKit frontend image."""
+        findings = _run_dockerfile("# syntax=docker/dockerfile:1\nFROM scratch\n")
+        assert len(findings) == 1
+        assert findings[0].line == 1
+        assert findings[0].message.startswith("# syntax 'docker/dockerfile:1'")
+
+    def test_pinned_frontend_accepted(self):
+        findings = _run_dockerfile(
+            "# syntax=docker/dockerfile:1{}\nFROM scratch\n".format(_DIGEST)
+        )
+        assert findings == []
+
+    def test_frontend_is_never_a_stage(self):
+        """A stage alias cannot stand in for the frontend image."""
+        findings = _run_dockerfile(
+            "# syntax=builder\nFROM python{} AS builder\n".format(_DIGEST)
+        )
+        assert [f.line for f in findings] == [1]
+
+    def test_syntax_after_unknown_directive_is_a_comment(self):
+        findings = _run_dockerfile("# foo=bar\n# syntax=docker/dockerfile:1\n")
+        assert findings == []
+
+
+class TestDockerfileOnbuild:
+    def test_onbuild_copy_from_image(self):
+        findings = _run_dockerfile("FROM scratch\nONBUILD COPY --from=alpine /a /b\n")
+        assert len(findings) == 1
+        assert "COPY --from 'alpine'" in findings[0].message
+
+    def test_onbuild_run_mount_from_image(self):
+        findings = _run_dockerfile(
+            "FROM scratch\nONBUILD RUN --mount=type=bind,from=alpine,target=/a ls\n"
+        )
+        assert len(findings) == 1
+
+    def test_onbuild_copy_from_stage(self):
+        findings = _run_dockerfile(
+            "FROM python{} AS base\nONBUILD COPY --from=base /a /b\n".format(_DIGEST)
+        )
+        assert findings == []
+
+
 class TestDockerfilePatterns:
     def test_containerfile_checked(self):
         findings = _run_dockerfile("FROM alpine\n", fname="Containerfile")
@@ -241,9 +344,14 @@ class TestDockerfilePatterns:
         findings = _run_dockerfile("FROM alpine\n", fname="api.dockerfile")
         assert len(findings) == 1
 
+    def test_capitalised_dot_dockerfile_checked(self):
+        """fnmatch is case-sensitive on POSIX, so both spellings are listed."""
+        findings = _run_dockerfile("FROM alpine\n", fname="api.Dockerfile")
+        assert len(findings) == 1
+
     def test_patterns_listed(self):
         patterns = DockerfileChecker.patterns
-        for p in ("Dockerfile*", "Containerfile*", "*.dockerfile"):
+        for p in ("Dockerfile*", "Containerfile*", "*.dockerfile", "*.Dockerfile"):
             assert p in patterns
 
 
