@@ -388,6 +388,40 @@ class TestExcludeFlag:
 # ---------------------------------------------------------------------------
 
 
+class TestIndexLimitFailsClosed:
+    """Review repro M2: YAML noise fills the index and hides a Dockerfile."""
+
+    def _create_tree(self, base):
+        # type: (str) -> None
+        for i in range(400):
+            _write(os.path.join(base, "charts", "t{}.yaml".format(i)), "")
+        _write(os.path.join(base, "services", "Dockerfile"), "FROM python:3.11\n")
+
+    def test_unrelated_yaml_does_not_fill_index(self):
+        """Only .github/workflows YAML is indexed for github_actions."""
+        d = _tmpdir()
+        try:
+            self._create_tree(d)
+            rc, out, err = run_pinstack(d)
+            assert rc == 1
+            assert "services/Dockerfile:1" in out
+            assert "scan incomplete" not in out
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_file_cap_reports_incomplete_scan(self):
+        """Hitting --max-files is a finding, not a stderr note with exit 0."""
+        d = _tmpdir()
+        try:
+            for i in range(3):
+                _write(os.path.join(d, "a{}".format(i), "Dockerfile"), _GOOD_DOCKERFILE)
+            rc, out, err = run_pinstack(d, "--max-files", "2")
+            assert rc == 1
+            assert "scan incomplete: index limit reached (2 files); 1 more" in out
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 class TestMaxDepthLimitsScan:
     def _create_nested_dockerfile(self, base):
         # type: (str) -> str
@@ -396,14 +430,28 @@ class TestMaxDepthLimitsScan:
         _write(os.path.join(nested, "Dockerfile"), _BAD_DOCKERFILE)
         return base
 
-    def test_shallow_depth_misses_nested_file(self):
+    def test_shallow_depth_reports_incomplete_scan(self):
+        """A file below --max-depth is not checked, and the gate does not pass."""
         d = _tmpdir()
         try:
             self._create_nested_dockerfile(d)
             # level3 is at depth 3 from base; max-depth=2 should not reach it
             rc, out, err = run_pinstack(d, "--max-depth", "2")
+            assert rc == 1
+            assert "python:3.11" not in out
+            assert "scan incomplete" in out
+            assert "level1/level2/level3/Dockerfile" in out
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_shallow_depth_exit_zero(self):
+        """--exit-zero still makes an incomplete scan advisory."""
+        d = _tmpdir()
+        try:
+            self._create_nested_dockerfile(d)
+            rc, out, err = run_pinstack(d, "--max-depth", "2", "--exit-zero")
             assert rc == 0
-            assert "Dockerfile" not in out or "FAIL" not in out
+            assert "scan incomplete" in out
         finally:
             shutil.rmtree(d, ignore_errors=True)
 

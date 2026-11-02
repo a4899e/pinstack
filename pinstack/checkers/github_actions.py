@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 
@@ -30,14 +29,21 @@ def _is_workflow_path(rel_path: str) -> bool:
 class GitHubActionsChecker(Checker):
     name = "github_actions"
     description = "Checks GitHub Actions workflow files for SHA-pinned action refs"
-    patterns: list[str] = ["*.yml", "*.yaml"]
+    # Path-qualified so that only workflow files count toward --max-files;
+    # every other YAML file in the repository would otherwise be indexed.
+    patterns: list[str] = [
+        ".github/workflows/*.yml",
+        ".github/workflows/*.yaml",
+        "*/.github/workflows/*.yml",
+        "*/.github/workflows/*.yaml",
+    ]
 
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
 
         for dir_path in sorted(index.keys()):
             for fname in sorted(index[dir_path]):
-                if not any(fnmatch.fnmatch(fname, p) for p in self.patterns):
+                if not fname.endswith((".yml", ".yaml")):
                     continue
 
                 full_path = os.path.join(dir_path, fname)

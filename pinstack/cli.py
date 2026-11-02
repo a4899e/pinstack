@@ -10,9 +10,10 @@ from typing import Optional
 import pinstack
 from pinstack.core import (
     CheckerRegistry,
-    build_index,
     format_text,
+    index_findings,
     run_checkers,
+    scan_index,
     DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_INDEX_SIZE,
 )
@@ -136,14 +137,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         patterns.update(checker.patterns)
 
     extra_exclude = set(args.exclude_dir) if args.exclude_dir else None
-    index = build_index(
+    scan = scan_index(
         root,
         patterns,
         max_depth=args.max_depth,
         max_index_size=args.max_files,
         extra_exclude_dirs=extra_exclude,
     )
-    findings = run_checkers(checkers, index, root)
+    findings = index_findings(scan, args.max_depth, args.max_files)
+    findings += run_checkers(checkers, scan.index, root)
 
     if args.output_format == "sarif":
         from pinstack.sarif import format_sarif

@@ -528,3 +528,103 @@ class TestPackageJsonLockFileCrossRef:
             assert "pnpm-lock.yaml" in cross_ref[0].message
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Lock files that parse to no packages (fail closed)
+# ---------------------------------------------------------------------------
+
+
+def _run_with_lock(lock_name, lock_content, deps=None):
+    # type: (str, str, dict) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "package.json"), "w") as fh:
+            json.dump({"dependencies": deps or {"left-pad": "1.3.0"}}, fh)
+        with open(os.path.join(d, lock_name), "w") as fh:
+            fh.write(lock_content)
+        return PackageJsonChecker().check({d: {"package.json", lock_name}}, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestPackageJsonEmptyLock:
+    def test_empty_object_package_lock(self):
+        """Review repro M1: package-lock.json containing {} satisfied the gate."""
+        findings = _run_with_lock("package-lock.json", "{}")
+        by_path = {f.path: f.message for f in findings}
+        assert by_path["package-lock.json"] == (
+            "package-lock.json contains no packages (empty or unrecognised format)"
+        )
+        assert "missing 1 dependency (left-pad)" in by_path["package.json"]
+        assert all(f.integrity for f in findings)
+
+    def test_unparseable_package_lock(self):
+        findings = _run_with_lock("package-lock.json", "not json")
+        assert any("contains no packages" in f.message for f in findings)
+
+    def test_zero_byte_yarn_lock(self):
+        findings = _run_with_lock("yarn.lock", "")
+        assert any(f.path == "yarn.lock" for f in findings)
+
+    def test_lockfile_v1_dependencies_map(self):
+        """lockfileVersion 1 lists packages under "dependencies", not "packages"."""
+        lock = json.dumps(
+            {
+                "lockfileVersion": 1,
+                "dependencies": {"left-pad": {"version": "1.3.0", "integrity": "x"}},
+            }
+        )
+        assert _run_with_lock("package-lock.json", lock) == []
+
+    def test_nested_node_modules_key(self):
+        lock = json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {},
+                    "node_modules/a/node_modules/@s/left-pad": {"version": "1.3.0"},
+                },
+            }
+        )
+        assert _run_with_lock("package-lock.json", lock, {"@s/left-pad": "1.3.0"}) == []
+
+    def test_pnpm_v9_keys_without_slash(self):
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "importers:\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      left-pad:\n"
+            "        specifier: 1.3.0\n"
+            "        version: 1.3.0\n"
+            "packages:\n"
+            "  left-pad@1.3.0:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "  '@s/p@1.0.0':\n"
+            "    resolution: {integrity: sha512-y}\n"
+            "snapshots:\n"
+            "  left-pad@1.3.0: {}\n"
+        )
+        findings = _run_with_lock(
+            "pnpm-lock.yaml", lock, {"left-pad": "1.3.0", "@s/p": "1.0.0"}
+        )
+        assert findings == []
+
+    def test_pnpm_v6_peer_suffix_and_v5_slash_version(self):
+        lock = (
+            "lockfileVersion: 5.4\n"
+            "packages:\n"
+            "  /left-pad/1.3.0:\n"
+            "    resolution: {integrity: sha512-x}\n"
+            "  /@s/p@1.0.0(react@18.2.0):\n"
+            "    resolution: {integrity: sha512-y}\n"
+        )
+        findings = _run_with_lock(
+            "pnpm-lock.yaml", lock, {"left-pad": "1.3.0", "@s/p": "1.0.0"}
+        )
+        assert findings == []
+
+    def test_pnpm_lock_without_packages_section(self):
+        findings = _run_with_lock("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+        assert any(f.path == "pnpm-lock.yaml" for f in findings)

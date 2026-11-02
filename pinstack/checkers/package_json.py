@@ -58,16 +58,23 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
             data = json.loads(content)
         except (ValueError, TypeError):
             return names
-        packages = data.get("packages", {})
-        for key in packages:
-            if not key:
-                continue  # skip root "" entry
-            # Strip node_modules/ prefix (possibly nested)
-            name = key
-            while name.startswith("node_modules/"):
-                name = name[len("node_modules/") :]
-            if name:
-                names.add(name)
+        if not isinstance(data, dict):
+            return names
+        # lockfileVersion 2 and 3 list "node_modules/<name>" paths under
+        # "packages"; lockfileVersion 1 (and v2, for compatibility) maps
+        # top-level names under "dependencies".
+        packages = data.get("packages")
+        if isinstance(packages, dict):
+            for key in packages:
+                if not key:
+                    continue  # skip root "" entry
+                # The installed name is the part after the last node_modules/
+                name = key.rsplit("node_modules/", 1)[-1]
+                if name:
+                    names.add(name)
+        dependencies = data.get("dependencies")
+        if isinstance(dependencies, dict):
+            names.update(k for k in dependencies if k)
     elif lock_filename == "yarn.lock":
         # Non-indented lines ending with : are package headers
         # e.g. "express@4.18.2:" or "express@^4.18.2, express@>=4.0.0:"
@@ -84,28 +91,33 @@ def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
                 else:
                     names.add(entry)
     elif lock_filename == "pnpm-lock.yaml":
-        # Package entries under packages: like /express@4.18.2: or /express/4.18.2:
+        # Entries under "packages:" are keyed by name and version:
+        #   v5:      /express/4.18.2:
+        #   v6-v8:   /express@4.18.2:   /@scope/pkg@1.0.0(peer@1.0.0):
+        #   v9:      express@4.18.2:    '@scope/pkg@1.0.0':
         in_packages = False
         for line in content.splitlines():
             stripped = line.strip()
-            if stripped == "packages:":
-                in_packages = True
+            if not line or line[0] not in (" ", "\t"):
+                in_packages = stripped == "packages:"
                 continue
-            if in_packages:
-                # End of packages section: non-indented line that isn't a package entry
-                if line and not line[0].isspace():
-                    in_packages = False
-                    continue
-                # Package entry lines start with / after stripping
-                if stripped.startswith("/"):
-                    entry = stripped.lstrip("/").rstrip(":")
-                    # Format: name@version or @scope/name@version
-                    # Find last @ that separates name from version
-                    at_pos = entry.rfind("@")
-                    if at_pos > 0:
-                        names.add(entry[:at_pos])
-                    else:
-                        names.add(entry)
+            if not in_packages or not stripped.endswith(":"):
+                continue
+            # Package keys are the least-indented lines in the section.
+            if len(line) - len(line.lstrip()) != 2:
+                continue
+            entry = stripped[:-1].strip("'\"").lstrip("/")
+            entry = entry.split("(", 1)[0]
+            at_pos = entry.rfind("@")
+            if at_pos > 0:
+                names.add(entry[:at_pos])
+                continue
+            # v5 "name/version" form
+            name, sep, version = entry.rpartition("/")
+            if sep and version[:1].isdigit():
+                names.add(name)
+            elif entry:
+                names.add(entry)
 
     return names
 
@@ -180,30 +192,45 @@ class PackageJsonChecker(Checker):
                 # Cross-reference: check that every manifest dep appears in the lock file
                 lock_filename = sorted(found_lock_files)[0]
                 lock_names = _extract_js_lock_names(full_path, lock_filename)
-                if lock_names:
-                    missing: list[str] = []
-                    for section in _DEP_SECTIONS:
-                        deps = data.get(section)
-                        if not deps or not isinstance(deps, dict):
-                            continue
-                        for pkg in sorted(deps.keys()):
-                            if pkg not in lock_names:
-                                missing.append(pkg)
-                    if missing:
-                        findings.append(
-                            Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=0,
-                                message="{} is stale: missing {} ({})".format(
-                                    lock_filename,
-                                    "{} dependency".format(len(missing))
-                                    if len(missing) == 1
-                                    else "{} dependencies".format(len(missing)),
-                                    ", ".join(sorted(missing)),
-                                ),
-                                integrity=True,
-                            )
+                if not lock_names:
+                    # An unreadable lock must not satisfy the lock requirement;
+                    # report it, then report every dependency as missing.
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=os.path.relpath(
+                                os.path.join(dir_path, lock_filename), root
+                            ),
+                            line=0,
+                            message="{} contains no packages (empty or unrecognised format)".format(
+                                lock_filename
+                            ),
+                            integrity=True,
                         )
+                    )
+                missing: list[str] = []
+                for section in _DEP_SECTIONS:
+                    deps = data.get(section)
+                    if not deps or not isinstance(deps, dict):
+                        continue
+                    for pkg in sorted(deps.keys()):
+                        if pkg not in lock_names:
+                            missing.append(pkg)
+                if missing:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=0,
+                            message="{} is stale: missing {} ({})".format(
+                                lock_filename,
+                                "{} dependency".format(len(missing))
+                                if len(missing) == 1
+                                else "{} dependencies".format(len(missing)),
+                                ", ".join(sorted(missing)),
+                            ),
+                            integrity=True,
+                        )
+                    )
 
         return findings
