@@ -449,3 +449,41 @@ class TestComposeAltFilename:
         """compose.yml (without docker-) should match compose*.yml pattern."""
         findings = _check_compose("compose_alt", fname="compose.yml")
         assert findings == []
+
+
+class TestDockerfileHeredocAndEscapeEdgeCases:
+    """Codex review of #10: literal `<<EOF` arguments and escaped escapes."""
+
+    def test_json_form_argument_is_not_a_heredoc(self):
+        findings = _run_dockerfile('FROM scratch\nRUN ["echo", "<<EOF"]\nFROM alpine\n')
+        assert [f.line for f in findings] == [3]
+
+    def test_quoted_argument_is_not_a_heredoc(self):
+        findings = _run_dockerfile("FROM scratch\nRUN echo '<<EOF'\nFROM alpine\n")
+        assert [f.line for f in findings] == [3]
+
+    def test_heredoc_inside_word_is_not_an_opener(self):
+        findings = _run_dockerfile("FROM scratch\nRUN echo a<<EOF\nFROM alpine\n")
+        assert [f.line for f in findings] == [3]
+
+    def test_unterminated_heredoc_reported(self):
+        findings = _run_dockerfile("FROM scratch\nRUN <<EOF\necho hi\nFROM alpine\n")
+        assert len(findings) == 1
+        assert findings[0].line == 2
+        assert "heredoc <<EOF is never closed" in findings[0].message
+
+    def test_escaped_trailing_backslash_ends_the_instruction(self):
+        """A line ending in two backslashes ends in an escaped backslash, not a continuation."""
+        findings = _run_dockerfile("FROM scratch\nRUN echo \\\\\nFROM alpine\n")
+        assert [f.line for f in findings] == [3]
+
+    def test_escaped_trailing_backtick_ends_the_instruction(self):
+        findings = _run_dockerfile(
+            "# escape=`\nFROM scratch\nRUN echo ``\nFROM alpine\n"
+        )
+        assert [f.line for f in findings] == [4]
+
+    def test_single_trailing_backslash_still_continues(self):
+        findings = _run_dockerfile("FROM \\\n  alpine\n")
+        assert "'alpine'" in findings[0].message
+        assert [f.line for f in findings] == [1]

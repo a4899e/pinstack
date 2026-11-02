@@ -58,7 +58,6 @@ _ONBUILD_RE = re.compile(r"^ONBUILD\s+", re.IGNORECASE)
 # precede the instruction's arguments, so a ``--from=`` or ``--mount=`` inside a
 # RUN shell command or a COPY source path is not mistaken for one.
 _FLAGS_RE = re.compile(r"^(COPY|ADD|RUN)((?:\s+--\S+)*)", re.IGNORECASE)
-_HEREDOC_INSTRUCTION_RE = re.compile(r"^(?:RUN|COPY|ADD)\s", re.IGNORECASE)
 _HEREDOC_RE = re.compile(r"<<(-?)([\"']?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
@@ -78,14 +77,54 @@ def _read_directives(lines: list[str]) -> dict[str, tuple[int, str]]:
     return directives
 
 
-def _read_instructions(lines: list[str], escape: str) -> list[tuple[int, str]]:
+def _heredoc_delimiters(instruction: str) -> list[tuple[bool, str]]:
+    """Return ``(strip_tabs, delimiter)`` for each heredoc an instruction opens.
+
+    Mirrors BuildKit: only RUN, COPY and ADD take heredocs, never in their
+    JSON (exec) form, and a heredoc opener is a ``<<`` that starts a shell
+    word outside quotes. ``RUN echo '<<EOF'`` and ``RUN ["echo", "<<EOF"]``
+    pass ``<<EOF`` as a literal argument.
+    """
+    m = _FLAGS_RE.match(instruction)
+    if not m:
+        return []
+    args = instruction[m.end() :].lstrip()
+    if args.startswith("["):
+        return []
+    delimiters: list[tuple[bool, str]] = []
+    quote = ""
+    i = 0
+    while i < len(args):
+        ch = args[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "<" and (i == 0 or args[i - 1].isspace()):
+            opener = _HEREDOC_RE.match(args, i)
+            if opener:
+                delimiters.append((bool(opener.group(1)), opener.group(3)))
+                i = opener.end()
+                continue
+        i += 1
+    return delimiters
+
+
+def _read_instructions(
+    lines: list[str], escape: str
+) -> tuple[list[tuple[int, str]], Optional[tuple[int, str]]]:
     """Join continuation lines into instructions, skipping heredoc bodies.
 
     :param lines: Raw file lines.
     :param escape: The continuation character, ``\\`` or a backtick.
-    :returns: ``(start_lineno, text)`` for every instruction.
+    :returns: ``(start_lineno, text)`` for every instruction, and
+        ``(lineno, delimiter)`` for a heredoc that is never closed (the
+        lines after it could not be read as instructions), or None.
     """
-    continuation_re = re.compile(re.escape(escape) + r"[ \t]*$")
+    # A trailing escape continues the line unless it is itself escaped.
+    e = re.escape(escape)
+    continuation_re = re.compile("(?<!" + e + ")" + e + r"[ \t]*$")
     instructions: list[tuple[int, str]] = []
     i = 0
     while i < len(lines):
@@ -109,16 +148,17 @@ def _read_instructions(lines: list[str], escape: str) -> list[tuple[int, str]]:
         instructions.append((start, text))
 
         # 3. Skip the bodies of any heredocs this instruction opens.
-        body = _ONBUILD_RE.sub("", text)
-        if not _HEREDOC_INSTRUCTION_RE.match(body):
-            continue
-        for strip_tabs, _, delimiter in _HEREDOC_RE.findall(body):
+        for strip_tabs, delimiter in _heredoc_delimiters(_ONBUILD_RE.sub("", text)):
+            closed = False
             while i < len(lines):
                 raw = lines[i].rstrip("\r\n")
                 i += 1
                 if (raw.lstrip("\t") if strip_tabs else raw) == delimiter:
+                    closed = True
                     break
-    return instructions
+            if not closed:
+                return instructions, (start, delimiter)
+    return instructions, None
 
 
 def _mount_from(option_list: str) -> Optional[str]:
@@ -206,7 +246,22 @@ class DockerfileChecker(Checker):
         if escape not in ("\\", "`"):
             escape = "\\"
 
-        for lineno, text in _read_instructions(lines, escape):
+        instructions, unterminated = _read_instructions(lines, escape)
+        if unterminated:
+            lineno, delimiter = unterminated
+            findings.append(
+                Finding(
+                    checker=self.name,
+                    path=rel_path,
+                    line=lineno,
+                    message=(
+                        "heredoc <<{} is never closed; the instructions after it"
+                        " could not be checked".format(delimiter)
+                    ),
+                    integrity=True,
+                )
+            )
+        for lineno, text in instructions:
             text = _ONBUILD_RE.sub("", text)
 
             m = _FROM_RE.match(text)
