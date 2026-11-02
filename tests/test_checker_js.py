@@ -91,9 +91,14 @@ class TestPackageJsonNonExactForms:
             f.message for f in self.findings
         ]
 
-    def test_wildcards_tags_and_ranges_not_exact_semver(self):
-        for pkg in "abcdefk":
+    def test_wildcards_and_tags_not_exact_semver(self):
+        for pkg in "abcdk":
             assert "not exact semver" in self.by_pkg[pkg].message, pkg
+            assert not self.by_pkg[pkg].integrity
+
+    def test_hyphen_and_or_ranges_unpinned(self):
+        for pkg in "ef":
+            assert "unpinned version" in self.by_pkg[pkg].message, pkg
             assert not self.by_pkg[pkg].integrity
 
     def test_git_sources_not_content_addressed(self):
@@ -139,6 +144,16 @@ class TestPackageJsonVersionAllowlist:
         assert _classify("npm:other@1.0.0") == (False, "")
         assert _classify("npm:@scope/other@1.0.0") == (False, "")
 
+    def test_yarn_nameless_alias(self):
+        """yarn accepts npm:<version> for the same package name."""
+        assert _classify("npm:1.2.3") == (False, "")
+        assert _classify("npm:^1.2.3") == (True, "unpinned version")
+
+    def test_loose_identifiers_rejected(self):
+        """Empty identifiers and non-ASCII digits are dist-tags to npm, not versions."""
+        for v in ("1.2.3-..", "1.2.3-", "1.2.3+", "1.2.3-a..b", "\u0661.\u0662.\u0663"):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
     def test_alias_without_version_flagged(self):
         assert _classify("npm:other") == (True, "not exact semver")
         assert _classify("npm:@scope/other") == (True, "not exact semver")
@@ -150,6 +165,11 @@ class TestPackageJsonVersionAllowlist:
             "git+ssh://git@github.com/u/r.git#" + self._SHA,
             "github:u/r#" + self._SHA,
             "u/r#" + self._SHA,
+            "https://github.com/u/r#" + self._SHA,
+            "https://gitlab.com/u/r.git#" + self._SHA,
+            "git+https://github.com/u/r.git#" + self._SHA + "::path:packages/x",
+            "github:u/r#commit=" + self._SHA,
+            "github:u/r#commit=" + self._SHA + "&workspace=x",
         ):
             assert _classify(v) == (False, ""), v
 
@@ -162,18 +182,38 @@ class TestPackageJsonVersionAllowlist:
             "u/r#" + self._SHA[:7],
             "gitlab:u/r",
             "git://github.com/u/r.git",
+            "u/r#" + self._SHA.upper(),
+            "github:u/r#branch=main&commit=" + self._SHA,
+            "github:u/r#" + self._SHA + "&tag=v1",
+            "https://github.com/u/r",
         ):
             assert _classify(v) == (True, "not content-addressed"), v
 
+    def test_windows_and_bare_local_paths_accepted(self):
+        for v in (".", "..", ".\\x", "..\\x", "C:\\x", "c:/x"):
+            assert _classify(v) == (False, ""), v
+
     def test_tarball_url_flagged(self):
         assert _classify("https://x.test/p.tgz") == (True, "not content-addressed")
+        assert _classify("https://github.com/u/r/archive/main.tar.gz") == (
+            True,
+            "not content-addressed",
+        )
         assert _classify("https://x.test/p.tgz#" + self._SHA) == (
             True,
             "not content-addressed",
         )
 
     def test_comparator_ranges_unpinned(self):
-        for v in ("^1.0.0", "~1.0.0", ">=1.0.0", "<2", ">=1.0.0 <2.0.0"):
+        for v in (
+            "^1.0.0",
+            "~1.0.0",
+            ">=1.0.0",
+            "<2",
+            ">=1.0.0 <2.0.0",
+            "1 || 2",
+            "1.0.0 - 2.0.0",
+        ):
             assert _classify(v) == (True, "unpinned version"), v
 
     def test_other_forms_not_exact(self):
@@ -184,6 +224,64 @@ class TestPackageJsonVersionAllowlist:
         """npm rejects non-string specs; the gate must not treat them as pinned."""
         for v in (None, 1, 1.5, {"version": "1.0.0"}):
             assert _classify(v) == (True, "not exact semver"), repr(v)
+
+
+def _run_package_json(data):
+    # type: (dict) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "package.json"), "w") as fh:
+            json.dump(data, fh)
+        return PackageJsonChecker().check({d: {"package.json"}}, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestPackageJsonOverrides:
+    """overrides/resolutions replace a dependency's resolved version."""
+
+    def test_npm_override_range_flagged(self):
+        findings = _run_package_json(
+            {"dependencies": {"a": "1.0.0"}, "overrides": {"a": "^2"}}
+        )
+        msgs = [f.message for f in findings if "overrides" in f.message]
+        assert msgs == [
+            "'a' in overrides has unpinned version '^2'; use an exact version"
+        ]
+
+    def test_npm_nested_override_flagged_with_path(self):
+        findings = _run_package_json(
+            {"overrides": {"foo": {".": "1.0.0", "bar": "latest"}}}
+        )
+        assert [f.message.split("'")[1] for f in findings] == ["foo > bar"]
+
+    def test_npm_override_dollar_reference_accepted(self):
+        """`$a` defers to the direct dependency, which is checked itself."""
+        findings = _run_package_json(
+            {"dependencies": {"a": "1.0.0"}, "overrides": {"a": "$a"}}
+        )
+        assert [f for f in findings if "overrides" in f.message] == []
+
+    def test_yarn_resolutions_flagged(self):
+        findings = _run_package_json({"resolutions": {"a/**/b": "1.x", "c": "1.0.0"}})
+        assert [f.message.split("'")[1] for f in findings] == ["a/**/b"]
+        assert "resolutions" in findings[0].message
+
+    def test_pnpm_overrides_flagged_and_removal_accepted(self):
+        findings = _run_package_json(
+            {"pnpm": {"overrides": {"a": "~1.0.0", "b": "-", "c": "1.0.0"}}}
+        )
+        assert [f.message.split("'")[1] for f in findings] == ["a"]
+        assert "pnpm.overrides" in findings[0].message
+
+    def test_removal_marker_only_for_pnpm(self):
+        findings = _run_package_json({"overrides": {"a": "-"}})
+        assert len(findings) == 1
+
+    def test_overrides_alone_need_no_lock(self):
+        """Overrides are not dependencies, so they don't trigger the lock requirement."""
+        findings = _run_package_json({"overrides": {"a": "1.0.0"}})
+        assert findings == []
 
 
 class TestPackageJsonBad:
