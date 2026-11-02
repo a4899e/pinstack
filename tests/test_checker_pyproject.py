@@ -1225,3 +1225,127 @@ class TestPEP508DirectReferences:
             "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         assert len(findings) == 0
+
+
+def _check_fixture(subdir_name):
+    # type: (str) -> list
+    """Run the checker on a fixture dir with its real lock file, as the CLI would."""
+    from pinstack.core import build_index
+
+    dirpath = os.path.join(FIXTURES, subdir_name)
+    index = build_index(dirpath, set(PyprojectChecker.patterns))
+    return PyprojectChecker().check(index, dirpath)
+
+
+class TestWildcardVersions:
+    """Review repro M4a: `==2.*` is a PEP 440 prefix match, not a pin."""
+
+    def test_pep508_and_poetry_wildcards_flagged(self):
+        findings = _check_fixture("wildcard")
+        assert [(f.line, f.message) for f in findings] == [
+            (4, "'requests' uses wildcard '==2.*'; pin to an exact version"),
+            (7, "'flask' uses wildcard '2.*'; use exact pinning"),
+        ]
+
+    def test_poetry_double_equals_wildcard(self):
+        from pinstack.checkers.pyproject import _check_poetry_version
+
+        assert _check_poetry_version("x", "==1.2.*")[0]
+        assert not _check_poetry_version("x", "==1.2.3")[0]
+
+    def test_requirements_wildcard_is_a_pin_error(self):
+        from pinstack.checkers.requirements import _check_line
+
+        skip, pin_error, hash_warn, _ = _check_line("requests==2.*")
+        assert pin_error and not hash_warn
+
+
+class TestInlineTableProject:
+    """Review repro M4b: PEP 621 tables written as inline tables or dotted keys."""
+
+    def test_inline_project_table(self):
+        findings = _check_fixture("inline_project")
+        assert [f.message for f in findings] == [
+            "'requests>=2' uses '>=' instead of '=='; use exact pinning"
+        ]
+
+    def test_multiline_inline_table(self):
+        arrays = extract_dependency_arrays(
+            "project = {\n"
+            '  name = "x",\n'
+            '  dependencies = [\n    "a>=1",  # comment\n  ],\n'
+            "}\n"
+            '[tool.other]\nx = ["b>=1"]\n'
+        )
+        assert arrays == [(["a>=1"], "dependencies")]
+
+    def test_optional_dependencies_inline_under_project(self):
+        arrays = extract_dependency_arrays(
+            '[project]\nname = "x"\noptional-dependencies = { dev = ["pytest>=7"] }\n'
+        )
+        assert arrays == [(["pytest>=7"], "dev")]
+
+    def test_dotted_keys(self):
+        arrays = extract_dependency_arrays(
+            'project.dependencies = ["a>=1"]\n'
+            "[project]\n"
+            'optional-dependencies.dev = ["b>=1"]\n'
+        )
+        assert arrays == [(["a>=1"], "dependencies"), (["b>=1"], "dev")]
+
+    def test_dependency_groups_inline_skips_include_group(self):
+        arrays = extract_dependency_arrays(
+            'dependency-groups = { dev = ["pytest>=7", { include-group = "lint" }] }\n'
+        )
+        assert arrays == [(["pytest>=7"], "dev")]
+
+    def test_other_inline_tables_ignored(self):
+        arrays = extract_dependency_arrays(
+            '[project]\nlicense = { text = "MIT" }\nurls = { home = "https://x" }\n'
+            '[tool.poetry.dependencies]\nfoo = { version = "^1", extras = ["a"] }\n'
+        )
+        assert arrays == []
+
+
+class TestPoetryDependencyForms:
+    """Review repro M4c+d: table-form and multi-constraint Poetry dependencies."""
+
+    def test_combined_repro(self):
+        findings = _check_fixture("poetry_forms")
+        assert [(f.line, f.message.split("'")[1]) for f in findings] == [
+            (5, "foo"),
+            (6, "bar"),
+            (9, "baz"),
+        ]
+
+    def test_every_constraint_checked(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.dependencies]\n"
+            "foo = [\n"
+            '  { version = "1.0.0", python = "<3.8" },\n'
+            '  { version = "^2.0", python = ">=3.8" },\n'
+            '  { git = "https://x", python = ">=3.12" },\n'
+            "]\n"
+            'after = "1.0.0"\n'
+        )
+        assert deps == [
+            ("foo", "1.0.0", 2),
+            ("foo", "^2.0", 2),
+            ("foo", "", 2),
+            ("after", "1.0.0", 7),
+        ]
+
+    def test_table_form_in_groups_and_without_version(self):
+        from pinstack.checkers.pyproject import extract_poetry_dependencies
+
+        deps = extract_poetry_dependencies(
+            "[tool.poetry.group.dev.dependencies.lint]\n"
+            'version = "1.0.0"  # pinned\n'
+            "[tool.poetry.dev-dependencies.gitdep]\n"
+            'git = "https://x"\n'
+            "[tool.poetry.dependencies.python]\n"
+            'version = "^3.9"\n'
+        )
+        assert deps == [("lint", "1.0.0", 1), ("gitdep", "", 3)]

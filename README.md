@@ -113,7 +113,7 @@ silently defeats the pinning it was supposed to guarantee.
 | Checker | Files Examined | What Is Checked |
 |---|---|---|
 | `requirements` | `requirements*.txt` | `==` pinning and `--hash=` integrity markers |
-| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`; a companion lock file must exist and must not be stale |
+| `pyproject` | `pyproject.toml`, plus `requirements*.txt`, `poetry.lock`, `pdm.lock`, `uv.lock` | `==` exact pins (no `==2.*` wildcards) in `[project]`, `[project.optional-dependencies]`, `[dependency-groups]`, and `[tool.poetry]`, whether written as sections, inline tables, or dotted keys, and including Poetry's table and multi-constraint forms; a companion lock file must exist and must not be stale |
 | `package_json` | `package.json`, plus `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | No `^`, `~`, or range specifiers in any dependency section; declared packages must appear in the lock file |
 | `package_lock` | `package-lock.json` | `integrity` hashes present on all packages |
 | `yarn_lock` | `yarn.lock` | Integrity checksums present |

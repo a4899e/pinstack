@@ -111,8 +111,8 @@ def _check_line(raw_line: str) -> tuple:
     version = m.group(3) or ""
 
     # Determine pin status
-    if operator == "==" and version:
-        # Correctly pinned. Now check for --hash=
+    if operator == "==" and version and "*" not in version:
+        # Correctly pinned (==2.* is a prefix match, not a pin). Now check for --hash=
         has_hash = "--hash=" in full_for_hash
         if has_hash:
             return False, False, False, pkg_name  # clean
