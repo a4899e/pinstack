@@ -1,0 +1,6 @@
+-c constraints.txt
+--requirement=missing.txt
+-r https://example.invalid/reqs.txt
+-r ${REQS_DIR}/extra.txt
+-r ../../outside.txt
+-rrequirements.txt

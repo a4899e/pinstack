@@ -68,11 +68,15 @@ class TestRequirementsCheckerGood:
         findings = _check_fixture("requirements-comments_only.txt")
         assert findings == [], "Comments and options only should produce 0 findings"
 
-    def test_includes_r_skipped_e_flagged(self):
+    def test_includes_followed_e_flagged(self):
+        """Review L2: -r targets are checked; these two do not exist, so they are reported."""
         findings = _check_fixture("requirements-includes.txt")
-        # -r lines are skipped, but -e (editable git install) is flagged
-        assert len(findings) == 1
-        assert "git+https" in findings[0].message
+        assert [f.message for f in findings] == [
+            "-r 'base.txt' does not exist, so its requirements cannot be checked",
+            "-r 'other-requirements.txt' does not exist, so its requirements cannot be checked",
+            "'git+https://github.com/example/pkg.git#egg=pkg' is not pinned with ==;"
+            " use package==version",
+        ]
 
     def test_requirements_dev_filename_pattern(self):
         """requirements-dev.txt should be matched by the requirements*.txt pattern."""
@@ -284,7 +288,7 @@ class TestRequirementsCheckerPEP508:
     def test_archive_url_with_hash_clean(self):
         """https:// URL with --hash — 0 findings."""
         findings = self._check(
-            "lib @ https://example.com/lib-1.0.tar.gz --hash=sha256:abcdef1234567890"
+            "lib @ https://example.com/lib-1.0.tar.gz --hash=sha256:" + "ab" * 32
         )
         assert len(findings) == 0
 
@@ -315,3 +319,122 @@ class TestRequirementsCheckerPEP508:
             "lib @ https://example.com/lib-1.0.tar.gz#subdirectory=src&sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         assert len(findings) == 0
+
+
+def _scan(subdir):
+    # type: (str) -> list
+    """Index a fixture tree the way the CLI does and run the checker over it."""
+    from pinstack.core import build_index
+
+    root = os.path.join(FIXTURES, subdir)
+    index = build_index(root, set(RequirementsChecker.patterns))
+    return [
+        (f.path.replace(os.sep, "/"), f.line, f.message)
+        for f in RequirementsChecker().check(index, root)
+    ]
+
+
+class TestRequirementsIncludes:
+    """Review repro L2: -r includes outside the requirements*.txt glob."""
+
+    def test_repro_include_outside_glob(self):
+        assert _scan("include_outside_glob") == [
+            (
+                "reqs/base.txt",
+                1,
+                "'requests' is not pinned with ==; use package==version",
+            )
+        ]
+
+    def test_django_layout_and_cycle(self):
+        """requirements/base.txt and production.txt include each other; each is checked once."""
+        assert _scan("django_layout") == [
+            (
+                "requirements/base.txt",
+                2,
+                "'django' is not pinned with ==; use package==version",
+            )
+        ]
+
+    def test_includes_that_cannot_be_checked(self):
+        assert _scan("include_edges") == [
+            (
+                "constraints.txt",
+                1,
+                "'urllib3' is not pinned with ==; use package==version",
+            ),
+            (
+                "requirements.txt",
+                2,
+                "-r 'missing.txt' does not exist, so its requirements cannot be checked",
+            ),
+            (
+                "requirements.txt",
+                3,
+                "-r 'https://example.invalid/reqs.txt' is fetched from a URL, so its"
+                " contents cannot be checked",
+            ),
+            (
+                "requirements.txt",
+                4,
+                "-r '${REQS_DIR}/extra.txt' uses an environment variable, so the file"
+                " cannot be checked",
+            ),
+            (
+                "requirements.txt",
+                5,
+                "-r '../../outside.txt' is outside the scanned directory, so it cannot"
+                " be checked",
+            ),
+        ]
+
+    def test_symlink_out_of_root_is_reported(self):
+        outside = tempfile.mkdtemp()
+        root = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(outside, "secret.txt"), "w") as fh:
+                fh.write("anything>=1\n")
+            os.symlink(outside, os.path.join(root, "linked"))
+            with open(os.path.join(root, "requirements.txt"), "w") as fh:
+                fh.write("-r linked/secret.txt\n")
+            findings = RequirementsChecker().check({root: {"requirements.txt"}}, root)
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+            shutil.rmtree(root, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "-r 'linked/secret.txt' is outside the scanned directory, so it cannot be checked"
+        ]
+
+
+class TestRequirementsHashValidation:
+    """Review L2: --hash values were never validated."""
+
+    def setup_method(self):
+        self.by_line = {line: m for _, line, m in _scan("hashes")}
+
+    def test_valid_hashes_pass(self):
+        """sha256 and sha512 with full digests, in --hash=v and --hash v form."""
+        assert 1 not in self.by_line and 2 not in self.by_line and 7 not in self.by_line
+
+    def test_weak_algorithm(self):
+        assert "uses md5, which pip does not accept for --hash" in self.by_line[3]
+
+    def test_short_digest(self):
+        assert "'sha256:abc' has 3 hex characters; sha256 needs 64" in self.by_line[4]
+
+    def test_non_hex_digest(self):
+        assert "is not a hex digest" in self.by_line[5]
+
+    def test_missing_algorithm(self):
+        assert "is not <algorithm>:<hex digest>" in self.by_line[6]
+
+    def test_one_bad_hash_among_good_is_reported(self):
+        assert "uses sha1, which pip does not accept" in self.by_line[8]
+
+    def test_url_reference_hash_validated(self):
+        from pinstack.checkers.requirements import _analyze_line
+
+        result = _analyze_line(
+            "pkg @ https://example.invalid/p.tar.gz --hash=sha256:abc"
+        )
+        assert result.kind == "hash_invalid"
