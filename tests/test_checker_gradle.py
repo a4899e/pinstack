@@ -367,7 +367,7 @@ def _decls(text):
     # type: (str) -> list
     from pinstack.checkers.gradle import _declarations
 
-    return [d[1:] for d in _declarations(text.splitlines(True))]
+    return [d[2:] for d in _declarations(text.splitlines(True))]
 
 
 class TestGradleModernBuild:
@@ -454,13 +454,18 @@ class TestGradleDeclarationForms:
 class TestGradleMapNotationLinearTime:
     """Review L4: the map-notation regex was quadratic in line length."""
 
-    def test_long_line_parses_quickly(self):
+    def test_long_line_parses_in_linear_time(self):
+        """Quadrupling the line should take ~4x as long, not ~16x."""
         import time
 
-        line = "implementation name: 'y' " + "group: 'g', " * 80000  # ~940 KB
-        start = time.perf_counter()
-        assert _decls(line) == [("g", "y", None)]
-        assert time.perf_counter() - start < 2.0
+        def timed(n):
+            line = "implementation name: 'y' " + "group: 'g', " * n
+            start = time.perf_counter()
+            assert _decls(line) == [("g", "y", None)]
+            return time.perf_counter() - start
+
+        small, large = timed(20000), timed(80000)  # ~235 KB, ~940 KB
+        assert large < 8 * small + 0.05, (small, large)
 
 
 class TestGradleVersionCatalog:
@@ -493,3 +498,100 @@ class TestGradleVersionCatalog:
         names = [m.split("'")[1] for _, _, m in self.findings]
         assert "guava" not in names
         assert "lib6" not in names
+
+
+class TestGradleReviewFollowUps:
+    def test_commented_out_after_brace_or_semicolon(self):
+        assert _decls(
+            '// dependencies { implementation "g:x:+" }\n'
+            '// TODO; implementation "g:y:+"\n'
+            '/* implementation "g:z:+"\n   api "g:w:+" */\n'
+            'implementation "g:a:1" // trailing { api "g:b:+" }\n'
+        ) == [("g", "a", "1")]
+
+    def test_comment_markers_inside_strings_kept(self):
+        assert _decls("implementation \"g:a:1\" // x\nimplementation 'g:b:2'\n") == [
+            ("g", "a", "1"),
+            ("g", "b", "2"),
+        ]
+
+    def test_groovy_list_of_coordinates(self):
+        assert _decls("implementation 'g:m1:1.0', 'g:m2:+'\n") == [
+            ("g", "m1", "1.0"),
+            ("g", "m2", "+"),
+        ]
+
+    def test_unquoted_map_version_is_a_variable(self):
+        assert _decls(
+            "implementation group: 'g', name: 'a', version: guavaVersion\n"
+            'implementation(group = "g", name = "b", version = libs.versions.b.get())\n'
+        ) == [("g", "a", "$guavaVersion"), ("g", "b", "$libs.versions.b.get()")]
+
+    def test_classpath_checked_against_buildscript_lockfile(self):
+        """Gradle locks the buildscript classpath in buildscript-gradle.lockfile."""
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "build.gradle"), "w") as fh:
+                fh.write(
+                    'buildscript { dependencies { classpath "com.android.tools.build:gradle:8.1.0" } }\n'
+                    'dependencies { implementation "g:a:1.0" }\n'
+                )
+            with open(os.path.join(d, "gradle.lockfile"), "w") as fh:
+                fh.write("g:a:1.0=compileClasspath\n")
+            index = {d: {"build.gradle", "gradle.lockfile"}}
+            assert GradleChecker().check(index, d) == []
+
+            with open(os.path.join(d, "buildscript-gradle.lockfile"), "w") as fh:
+                fh.write("other:x:1.0=classpath\n")
+            index[d].add("buildscript-gradle.lockfile")
+            (finding,) = GradleChecker().check(index, d)
+            assert finding.path == "buildscript-gradle.lockfile"
+            assert "com.android.tools.build:gradle" in finding.message
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class TestGradleCatalogForms:
+    def _catalog(self, text):
+        # type: (str) -> list
+        import shutil
+        import tempfile
+
+        from pinstack.checkers.gradle import _catalog_findings
+
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "libs.versions.toml")
+            with open(path, "w") as fh:
+                fh.write(text)
+            return [
+                (f.line, f.message.split("'")[1])
+                for f in _catalog_findings(path, "c", "gradle")
+            ]
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_inline_table_version_ref(self):
+        assert (
+            self._catalog(
+                '[libraries]\nr = { module = "g:r", version = { ref = "a" } }\n'
+            )
+            == []
+        )
+
+    def test_sub_table_entries(self):
+        assert self._catalog(
+            "[libraries.tbl]\n"
+            'module = "g:tbl"\n'
+            'version = "1.+"\n'
+            "[libraries.ok]\n"
+            'module = "g:ok"\n'
+            'version.ref = "x"\n'
+            "[versions.rich]\n"
+            'strictly = "[1,2)"\n'
+            "[plugins.p]\n"
+            'id = "x"\n'
+        ) == [(1, "tbl"), (7, "rich"), (9, "p")]

@@ -8,7 +8,7 @@ import os
 import re
 from typing import Optional
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, _matches_any_pattern
 
 # Dependency configurations to match (Groovy and Kotlin DSL)
 _CONFIGS = (
@@ -58,7 +58,8 @@ _DEP_RE = re.compile(
 # linear in its length.
 _CONFIG_START_RE = re.compile(r"""^\s*(?P<config>""" + _CONFIG_PAT + r""")\b""")
 _MAP_FIELD_RE = re.compile(
-    r"""\b(?P<key>group|name|version)\s*[:=]\s*['"](?P<value>[^'"]*)['"]"""
+    r"""\b(?P<key>group|name|version)\s*[:=]\s*"""
+    r"""(?:['"](?P<value>[^'"]*)['"]|(?P<expr>[A-Za-z_$][\w.$]*(?:\(\))?))"""
 )
 
 # Patterns that indicate a dynamic/bad version in the version segment
@@ -71,10 +72,52 @@ def _match_map_notation(line: str) -> Optional[tuple[str, str, Optional[str]]]:
         return None
     fields: dict[str, str] = {}
     for m in _MAP_FIELD_RE.finditer(line):
-        fields.setdefault(m.group("key"), m.group("value"))
+        value = m.group("value")
+        if value is None:
+            # An unquoted expression (version: guavaVersion, or Kotlin
+            # version = libs.versions.x.get()) is resolved at build time.
+            expr = m.group("expr")
+            value = expr if expr.startswith("$") else "$" + expr
+        fields.setdefault(m.group("key"), value)
     if not fields.get("group") or not fields.get("name"):
         return None
     return fields["group"], fields["name"], fields.get("version")
+
+
+def _strip_comments(text: str) -> str:
+    """Blank ``//`` and ``/* */`` comments outside string literals.
+
+    Newlines are kept so line numbers still hold. Groovy and Kotlin strings
+    may be single-, double- or triple-quoted.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i : i + 2]
+        if two == "//":
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            out.append(" " * (end - i))
+            i = end
+        elif two == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            out.append("".join(c if c == "\n" else " " for c in text[i:end]))
+            i = end
+        elif text[i] in ("'", '"'):
+            quote = text[i] * 3 if text.startswith(text[i] * 3, i) else text[i]
+            j = i + len(quote)
+            while j < n and not text.startswith(quote, j):
+                if text[j] == "\n" and len(quote) == 1:
+                    break  # unterminated single-line string
+                j += 2 if text[j] == "\\" else 1
+            end = min(j + len(quote), n)
+            out.append(text[i:end])
+            i = end
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
 
 
 def _split_statements(line: str) -> list[str]:
@@ -100,27 +143,52 @@ def _split_statements(line: str) -> list[str]:
     return statements
 
 
+# Further coordinates in Groovy's list form: implementation 'g:a:1', 'g:b:2'
+_EXTRA_COORD_RE = re.compile(
+    r""",\s*['"](?P<group>[^'":\s]+):(?P<artifact>[^'":\s]+)(?::(?P<version>[^'"]*))?['"]"""
+)
+
+
 def _declarations(
     lines: list[str],
-) -> list[tuple[int, str, str, Optional[str]]]:
-    """Return (line, group, artifact, version or None) for each declaration."""
-    found: list[tuple[int, str, str, Optional[str]]] = []
-    for lineno, raw_line in enumerate(lines, start=1):
-        for statement in _split_statements(raw_line):
+) -> list[tuple[int, str, str, str, Optional[str]]]:
+    """Return (line, config, group, artifact, version or None) per declaration.
+
+    Comments are removed first, so a commented-out declaration is ignored
+    even when it follows a brace or semicolon.
+    """
+    found: list[tuple[int, str, str, str, Optional[str]]] = []
+    code_lines = _strip_comments("".join(lines)).split("\n")
+    for lineno, code in enumerate(code_lines, start=1):
+        for statement in _split_statements(code):
             m = _DEP_RE.match(statement)
             if m:
+                config = m.group("config")
                 found.append(
                     (
                         lineno,
+                        config,
                         m.group("group") or "",
                         m.group("artifact") or "",
                         m.group("version"),
                     )
                 )
+                for extra in _EXTRA_COORD_RE.finditer(statement, m.end()):
+                    found.append(
+                        (
+                            lineno,
+                            config,
+                            extra.group("group"),
+                            extra.group("artifact"),
+                            extra.group("version"),
+                        )
+                    )
                 continue
             parsed = _match_map_notation(statement)
             if parsed is not None:
-                found.append((lineno,) + parsed)
+                config_match = _CONFIG_START_RE.match(statement)
+                config = config_match.group("config") if config_match else ""
+                found.append((lineno, config) + parsed)
     return found
 
 
@@ -177,19 +245,48 @@ def _parse_lockfile_coords(path: str) -> set[str]:
 _CATALOG_SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
 _CATALOG_ENTRY_RE = re.compile(r"""^\s*([A-Za-z0-9_.\-]+)\s*=\s*(.+?)\s*$""")
 _TOML_STRING_RE = re.compile(r"""^["']([^"']*)["']""")
-_INLINE_FIELD_RE = re.compile(
-    r"""\b(module|group|name|version|strictly|require|prefer)\s*=\s*["']([^"']*)["']"""
+_VERSION_FIELD_RE = re.compile(
+    r"""\b(version|strictly|require|prefer)\s*=\s*["']([^"']*)["']"""
 )
-_VERSION_REF_RE = re.compile(r"\bversion\.ref\s*=")
+# version.ref = "x", or the same written as an inline table: version = { ref = "x" }
+_VERSION_REF_RE = re.compile(r"""\bversion\s*(?:\.\s*ref\s*=|=\s*\{[^}]*\bref\s*=)""")
+_CATALOG_SECTIONS = ("versions", "libraries", "plugins")
+
+
+def _catalog_entry_versions(section: str, value: str) -> Optional[list[str]]:
+    """Return the version strings a catalog entry declares.
+
+    Returns None when the entry takes its version from ``[versions]``
+    (checked there) or is not an entry this checker reads.
+    """
+    string_match = _TOML_STRING_RE.match(value)
+    if string_match:
+        text = string_match.group(1)
+        if section == "versions":
+            return [text]
+        if section == "libraries":
+            # "group:artifact:version"
+            parts = text.split(":")
+            return [parts[2] if len(parts) >= 3 else ""]
+        # plugins: "id:version"
+        return [text.split(":", 1)[1] if ":" in text else ""]
+    if value.startswith("{") or "\n" in value:
+        if _VERSION_REF_RE.search(value):
+            return None
+        versions = [v for _, v in _VERSION_FIELD_RE.findall(value)]
+        return versions or [""]
+    return None
 
 
 def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
     """Check a Gradle version catalog (libs.versions.toml).
 
     ``[versions]`` entries, and the versions written inline in ``[libraries]``
-    and ``[plugins]``, must be exact. A library with neither a version nor a
-    ``version.ref`` resolves through a platform or constraint the catalog
-    cannot show, so it is reported as missing a version. Rich versions
+    and ``[plugins]``, must be exact. Entries may be written inline
+    (``guava = { module = ..., version = ... }``) or as their own table
+    (``[libraries.guava]``). A library with neither a version nor a version
+    reference resolves through a platform or constraint the catalog cannot
+    show, so it is reported as missing a version. Rich versions
     (``{ strictly = ..., require = ..., prefer = ... }``) are checked field
     by field.
     """
@@ -199,51 +296,39 @@ def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
     except OSError:
         return []
 
-    findings: list[Finding] = []
+    # 1. Collect (alias, section, line, value text) for every entry.
+    entries: list[tuple[str, str, int, str]] = []
     section = ""
+    table_entry: Optional[list] = None  # [alias, section, line, text] for [libraries.x]
     for lineno, raw in enumerate(lines, start=1):
         if raw.lstrip().startswith("#"):
             continue
-        line = raw
-        m = _CATALOG_SECTION_RE.match(line)
+        m = _CATALOG_SECTION_RE.match(raw)
         if m:
+            if table_entry is not None:
+                entries.append(tuple(table_entry))  # type: ignore[arg-type]
+                table_entry = None
             section = m.group(1).strip()
+            parent, _, alias = section.partition(".")
+            if parent in _CATALOG_SECTIONS and alias:
+                table_entry = [alias.strip("\"'"), parent, lineno, "\n"]
             continue
-        if section not in ("versions", "libraries", "plugins"):
+        if table_entry is not None:
+            table_entry[3] += raw
             continue
-        m = _CATALOG_ENTRY_RE.match(line)
-        if not m:
+        if section not in _CATALOG_SECTIONS:
             continue
-        alias, value = m.group(1), m.group(2)
+        m = _CATALOG_ENTRY_RE.match(raw)
+        if m:
+            entries.append((m.group(1), section, lineno, m.group(2)))
+    if table_entry is not None:
+        entries.append(tuple(table_entry))  # type: ignore[arg-type]
 
-        versions: list[str] = []
-        string_match = _TOML_STRING_RE.match(value)
-        if string_match:
-            text = string_match.group(1)
-            if section == "versions":
-                versions.append(text)
-            elif section == "libraries":
-                # "group:artifact:version"
-                parts = text.split(":")
-                versions.append(parts[2] if len(parts) >= 3 else "")
-            else:
-                # plugins: "id:version"
-                versions.append(text.split(":", 1)[1] if ":" in text else "")
-        elif value.startswith("{"):
-            if _VERSION_REF_RE.search(value):
-                continue  # checked where [versions] defines it
-            fields = _INLINE_FIELD_RE.findall(value)
-            versions = [
-                v
-                for k, v in fields
-                if k in ("version", "strictly", "require", "prefer")
-            ]
-            if not versions:
-                versions.append("")
-        else:
-            continue
-
-        for version in versions:
+    # 2. Check each declared version.
+    findings: list[Finding] = []
+    for alias, entry_section, lineno, value in entries:
+        versions = _catalog_entry_versions(entry_section, value)
+        for version in versions or []:
             reason = _is_bad_version(version)
             if reason == "missing version":
                 message = (
@@ -258,13 +343,14 @@ def _catalog_findings(path: str, rel_path: str, checker: str) -> list[Finding]:
                     checker=checker,
                     path=rel_path,
                     line=lineno,
-                    message=message.format(alias, section, reason),
+                    message=message.format(alias, entry_section, reason),
                 )
             )
     return findings
 
 
 _BUILD_FILES = ("build.gradle", "build.gradle.kts")
+_BUILDSCRIPT_LOCKFILE = "buildscript-gradle.lockfile"
 _SCRIPT_PATTERNS = ("*.gradle", "*.gradle.kts")
 _CATALOG_PATTERN = "*.versions.toml"
 
@@ -280,6 +366,7 @@ class GradleChecker(Checker):
     patterns: list[str] = [
         *_SCRIPT_PATTERNS,
         "gradle.lockfile",
+        _BUILDSCRIPT_LOCKFILE,
         _CATALOG_PATTERN,
     ]
 
@@ -300,7 +387,7 @@ class GradleChecker(Checker):
 
             build_files = [f for f in _BUILD_FILES if f in files]
             scripts = sorted(
-                f for f in files if any(fnmatch.fnmatch(f, p) for p in _SCRIPT_PATTERNS)
+                f for f in files if _matches_any_pattern(f, set(_SCRIPT_PATTERNS))
             )
             has_lockfile = "gradle.lockfile" in files
 
@@ -330,9 +417,16 @@ class GradleChecker(Checker):
             if has_lockfile:
                 lock_path = os.path.join(dir_path, "gradle.lockfile")
                 lock_coords = _parse_lockfile_coords(lock_path)
+            has_buildscript_lock = _BUILDSCRIPT_LOCKFILE in files
+            buildscript_coords: set[str] = set()
+            if has_buildscript_lock:
+                buildscript_coords = _parse_lockfile_coords(
+                    os.path.join(dir_path, _BUILDSCRIPT_LOCKFILE)
+                )
 
-            # Check dependency versions in each script
-            missing_from_lock: list[str] = []
+            # Check dependency versions in each script. Missing coordinates
+            # are kept per lockfile: [gradle.lockfile, buildscript lockfile].
+            missing_from_lock: tuple[list[str], list[str]] = ([], [])
             for fname in scripts:
                 full_path = os.path.join(dir_path, fname)
                 rel_path = os.path.relpath(full_path, root)
@@ -343,8 +437,13 @@ class GradleChecker(Checker):
                 except OSError:
                     continue
 
-                for lineno, group, artifact, version in _declarations(lines):
+                for lineno, config, group, artifact, version in _declarations(lines):
                     coord = "{}:{}".format(group, artifact)
+                    # Gradle locks the buildscript classpath separately.
+                    if config == "classpath":
+                        locked, lock_present = buildscript_coords, has_buildscript_lock
+                    else:
+                        locked, lock_present = lock_coords, has_lockfile
 
                     if version is None:
                         findings.append(
@@ -374,23 +473,25 @@ class GradleChecker(Checker):
                         continue
 
                     # Version is pinned and valid: collect for cross-reference
-                    if has_lockfile and coord not in lock_coords:
-                        missing_from_lock.append(coord)
+                    if lock_present and coord not in locked:
+                        missing_from_lock[config == "classpath"].append(coord)
 
-            if missing_from_lock:
-                lock_rel = os.path.relpath(
-                    os.path.join(dir_path, "gradle.lockfile"), root
-                )
+            for lock_name, missing in zip(
+                ("gradle.lockfile", _BUILDSCRIPT_LOCKFILE), missing_from_lock
+            ):
+                if not missing:
+                    continue
                 findings.append(
                     Finding(
                         checker=self.name,
-                        path=lock_rel,
+                        path=os.path.relpath(os.path.join(dir_path, lock_name), root),
                         line=0,
-                        message="gradle.lockfile is stale: missing {} ({})".format(
-                            "{} dependency".format(len(missing_from_lock))
-                            if len(missing_from_lock) == 1
-                            else "{} dependencies".format(len(missing_from_lock)),
-                            ", ".join(sorted(missing_from_lock)),
+                        message="{} is stale: missing {} ({})".format(
+                            lock_name,
+                            "{} dependency".format(len(missing))
+                            if len(missing) == 1
+                            else "{} dependencies".format(len(missing)),
+                            ", ".join(sorted(missing)),
                         ),
                         integrity=True,
                     )
