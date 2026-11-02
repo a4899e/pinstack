@@ -104,3 +104,159 @@ class TestGHANotInWorkflows:
         index = {root: {"some_config.yml"}}
         findings = GitHubActionsChecker().check(index, root)
         assert findings == [], "Files outside .github/workflows/ should be ignored"
+
+
+_SHA = "ab12" * 10
+_DIGEST = "@sha256:" + "a1b2c3d4" * 8
+
+
+def _scan(subpath):
+    # type: (str) -> list
+    """Index a fixture tree the way the CLI does and run the checker over it."""
+    from pinstack.core import build_index
+
+    root = os.path.join(GHA_FIXTURES, subpath)
+    index = build_index(root, set(GitHubActionsChecker.patterns))
+    return [
+        (f.path.replace(os.sep, "/"), f.line, f.message)
+        for f in GitHubActionsChecker().check(index, root)
+    ]
+
+
+def _workflow(text, fname="ci.yml"):
+    # type: (str, str) -> list
+    import shutil
+    import tempfile
+
+    d = tempfile.mkdtemp()
+    try:
+        wf = os.path.join(d, ".github", "workflows")
+        os.makedirs(wf)
+        with open(os.path.join(wf, fname), "w") as fh:
+            fh.write(text)
+        return [
+            (f.line, f.message) for f in GitHubActionsChecker().check({wf: {fname}}, d)
+        ]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestGHAFlowStyleAndContainers:
+    """Review repro L1: flow style, quoted keys, containers, composite actions."""
+
+    def test_repro(self):
+        assert _scan("flow_and_containers") == [
+            (
+                ".github/actions/setup/action.yml",
+                5,
+                "action 'actions/setup-python' is not pinned to a full-length SHA (got 'v5')",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                6,
+                "container image 'node:20' is not pinned with @sha256: digest",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                8,
+                "action 'actions/checkout' is not pinned to a full-length SHA (got 'v4')",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                9,
+                "action 'actions/setup-node' is not pinned to a full-length SHA (got 'v4')",
+            ),
+        ]
+
+    def test_container_string_form_and_services(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    runs-on: ubuntu-latest\n    container: node:18\n"
+            "    services:\n      redis:\n        image: 'redis:7'\n"
+            '      db: {image: "postgres:16", ports: [5432]}\n'
+            "      ok:\n        image: postgres" + _DIGEST + "\n"
+        )
+        assert findings == [
+            (4, "container image 'node:18' is not pinned with @sha256: digest"),
+            (7, "service 'redis' image 'redis:7' is not pinned with @sha256: digest"),
+            (8, "service 'db' image 'postgres:16' is not pinned with @sha256: digest"),
+        ]
+
+    def test_container_expression_unverifiable(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    container:\n      image: ${{ matrix.image }}\n"
+        )
+        assert [m for _, m in findings] == [
+            "container image '${{ matrix.image }}' uses an expression which cannot"
+            " be verified; write the image reference with an @sha256: digest"
+        ]
+
+    def test_reusable_workflow_job(self):
+        findings = _workflow(
+            "jobs:\n  call:\n    uses: org/repo/.github/workflows/x.yml@main\n"
+        )
+        assert [m for _, m in findings] == [
+            "action 'org/repo/.github/workflows/x.yml' is not pinned to a full-length SHA (got 'main')"
+        ]
+
+    def test_with_inputs_and_run_scripts_are_not_refs(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n"
+            "      - uses: actions/checkout@" + _SHA + "\n"
+            "        with:\n          image: node:20\n          uses: not-a-ref\n"
+            "      - run: |\n          uses: fake/action@v1\n"
+            "          - uses: also/fake@v1\n"
+        )
+        assert findings == []
+
+    def test_values_on_next_line_and_block_scalars(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n      - uses:\n          actions/cache@v4\n"
+            "      - uses: >-\n          actions/upload-artifact@v4\n"
+        )
+        assert [line for line, _ in findings] == [5, 6]
+
+    def test_aliases(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n      - uses: &co actions/checkout@v4\n"
+            "      - uses: *co\n      - uses: *nowhere\n"
+        )
+        assert findings == [
+            (
+                4,
+                "action 'actions/checkout' is not pinned to a full-length SHA (got 'v4')",
+            ),
+            (
+                5,
+                "action 'actions/checkout' is not pinned to a full-length SHA (got 'v4')",
+            ),
+            (6, "uses: '*nowhere' is a YAML alias pinstack could not resolve"),
+        ]
+
+    def test_docker_action_digest_must_be_64_hex(self):
+        """Review L3: `@sha256:` must be followed by a full digest."""
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n      - uses: docker://alpine@sha256:abc\n"
+            "      - uses: docker://alpine" + _DIGEST + "\n"
+        )
+        assert findings == [
+            (
+                4,
+                "docker action 'docker://alpine@sha256:abc' has a malformed @sha256:"
+                " digest; expected 64 lowercase hex characters at the end of the reference",
+            )
+        ]
+
+    def test_docker_action_metadata_image(self):
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "action.yaml"), "w") as fh:
+                fh.write("runs:\n  using: docker\n  image: docker://alpine:3\n")
+            findings = GitHubActionsChecker().check({d: {"action.yaml"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "docker action image 'docker://alpine:3' is not pinned with @sha256: digest"
+        ]

@@ -44,7 +44,7 @@ import os
 import re
 from typing import Optional
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, image_digest_problem
 
 _KNOWN_DIRECTIVES = frozenset(["syntax", "escape", "check"])
 _DIRECTIVE_RE = re.compile(r"^#\s*([a-zA-Z][a-zA-Z0-9_-]*)\s*=\s*(.*?)\s*$")
@@ -272,9 +272,7 @@ def _reference_problem(
             "uses a variable reference which cannot be verified;"
             " write the image reference with an @sha256: digest"
         )
-    if "@sha256:" not in image:
-        return "is not pinned with @sha256: digest"
-    return None
+    return image_digest_problem(image)
 
 
 class DockerfileChecker(Checker):

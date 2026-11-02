@@ -1,15 +1,27 @@
-"""Docker Compose checker: enforces digest pinning on image references."""
+"""Docker Compose checker: enforces digest pinning on image references.
+
+Every ``image:`` value in a compose file must end in ``@sha256:`` and 64
+lowercase hex characters. The file is read with :mod:`pinstack.yaml_scan`,
+so flow style (``services: {web: {image: nginx:1.25}}``), quoted keys and
+values, and images set through a YAML anchor (``x-base: &base`` then
+``<<: *base``) are all seen. ``image`` keys under ``labels``,
+``environment`` and ``annotations`` are data, not images, and are skipped.
+
+Compose interpolates ``$VAR`` / ``${VAR}`` from the environment, so a
+reference whose digest is not written out literally is reported as
+unverifiable; a variable before a literal digest (``${REGISTRY}/app@sha256:...``)
+is fine, since the digest still names the content.
+"""
 
 from __future__ import annotations
 
 import fnmatch
 import os
-import re
 
-from pinstack.core import Checker, Finding, FileIndex
+from pinstack.core import Checker, Finding, FileIndex, image_digest_problem
+from pinstack.yaml_scan import scalars
 
-# Matches lines like:   image: nginx:1.25
-_IMAGE_RE = re.compile(r"^\s*image:\s*(\S+)")
+_DATA_KEYS = frozenset(["labels", "environment", "annotations"])
 
 
 class ComposeChecker(Checker):
@@ -37,28 +49,33 @@ class ComposeChecker(Checker):
 
                 try:
                     with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                        lines = fh.readlines()
+                        content = fh.read()
                 except OSError:
                     continue
 
-                for lineno, raw_line in enumerate(lines, start=1):
-                    m = _IMAGE_RE.match(raw_line)
-                    if not m:
+                for item in scalars(content):
+                    if item.key != "image" or _DATA_KEYS.intersection(item.path[:-1]):
                         continue
-
-                    image = m.group(1)
-
-                    if "@sha256:" not in image:
-                        findings.append(
-                            Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=lineno,
-                                message="image '{}' is not pinned with @sha256: digest".format(
-                                    image
-                                ),
-                                integrity=True,
+                    image = item.value
+                    if item.alias:
+                        problem = "is a YAML alias pinstack could not resolve"
+                    else:
+                        problem = image_digest_problem(image)
+                        if problem and "$" in image.replace("$$", ""):
+                            problem = (
+                                "uses a variable reference which cannot be verified;"
+                                " write the image reference with an @sha256: digest"
                             )
+                    if problem is None:
+                        continue
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=item.line,
+                            message="image '{}' {}".format(image, problem),
+                            integrity=True,
                         )
+                    )
 
         return findings

@@ -1,0 +1,391 @@
+"""A small YAML reader for finding mapping values, with no dependencies.
+
+pinstack has no runtime dependencies, so it cannot use a YAML library. The
+checkers that read YAML need only one thing from a document: every scalar
+value together with the chain of mapping keys above it (``jobs.build.steps``
+then a sequence item then ``uses``), and its line number. Matching lines with
+a regex misses flow style (``- {uses: actions/checkout@v4}``), quoted keys
+(``"uses": ...``) and values spread over several lines, and it mistakes text
+inside a ``run: |`` script for real keys. This module reads the structure
+instead:
+
+- block mappings and sequences, including sequences at the same indentation
+  as their key;
+- flow mappings and sequences, also when they span several lines;
+- single- and double-quoted keys and values;
+- ``#`` comments outside quotes;
+- block scalars (``|``, ``>``, with indicators): the content is the value of
+  its key and is never read as keys, so text inside a ``run: |`` script
+  cannot look like a ``uses:`` entry;
+- anchors (``&name``) and tags (``!tag``) before a value, and aliases
+  (``*name``), which are resolved to the anchored scalar when there is one;
+- several documents separated by ``---``.
+
+Anything it cannot read (a complex ``?`` key, a malformed flow collection)
+is skipped rather than guessed at. Callers that must fail closed should treat
+an alias they cannot resolve as unverifiable.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Optional
+
+# A sequence item marker in a key path.
+ITEM = "-"
+
+
+@dataclass(frozen=True)
+class Scalar:
+    """A scalar value and where it sits in the document.
+
+    :ivar path: the mapping keys from the document root down to this value,
+        with ``ITEM`` for each sequence item; the last element is the value's
+        own key (or ``ITEM`` for a bare sequence entry).
+    :ivar value: the scalar text, unquoted. For an alias that could not be
+        resolved it is ``*name`` and ``alias`` is True.
+    :ivar line: the 1-based line the value starts on.
+    """
+
+    path: tuple[str, ...]
+    value: str
+    line: int
+    alias: bool = False
+
+    @property
+    def key(self) -> str:
+        return self.path[-1] if self.path else ""
+
+
+_BLOCK_SCALAR_RE = re.compile(r"^[|>][0-9+-]*$")
+_PROPERTY_RE = re.compile(r"^(?:[&!][^\s,\[\]{}]*\s+)+")
+_ANCHOR_RE = re.compile(r"&([^\s,\[\]{}]+)")
+
+
+def _strip_comment(line: str) -> str:
+    """Remove a ``#`` comment that is outside quotes.
+
+    A ``#`` starts a comment at the start of the line or after whitespace.
+    """
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                if quote == "'" and line[i + 1 : i + 2] == "'":
+                    i += 2
+                    continue
+                quote = ""
+        elif ch in ("'", '"') and (i == 0 or line[i - 1] in " \t:-[{,"):
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i].rstrip()
+        i += 1
+    return line.rstrip()
+
+
+def _unquote(text: str) -> str:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] == "'":
+        return text[1:-1].replace("''", "'")
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        out: list[str] = []
+        i = 1
+        while i < len(text) - 1:
+            ch = text[i]
+            if ch == "\\" and i + 1 < len(text) - 1:
+                nxt = text[i + 1]
+                out.append(
+                    {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "/": "/"}.get(nxt, nxt)
+                )
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+    return text
+
+
+def _split_key(text: str) -> Optional[tuple[str, str]]:
+    """Split ``key: value`` at the first ``:`` that ends a key, outside quotes.
+
+    A ``:`` ends a key when it is followed by whitespace or the end of text.
+    Returns None when the text is not a mapping entry.
+    """
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"') and i == 0:
+            quote = ch
+        elif ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
+            key = text[:i].strip()
+            if not key or key.startswith("?"):
+                return None
+            return _unquote(key), text[i + 1 :].strip()
+        elif ch in "{[" and i == 0:
+            return None
+        i += 1
+    return None
+
+
+def _bracket_balance(text: str) -> int:
+    """Return how many ``{``/``[`` are left open in ``text``, outside quotes."""
+    depth = 0
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        i += 1
+    return depth
+
+
+class _Reader:
+    def __init__(self) -> None:
+        self.out: list[Scalar] = []
+        self.anchors: dict[str, str] = {}
+
+    # -- values -----------------------------------------------------------
+
+    def emit(self, path: tuple[str, ...], raw: str, line: int) -> None:
+        """Record one scalar, handling anchors, tags and aliases."""
+        raw = raw.strip()
+        props = _PROPERTY_RE.match(raw)
+        anchor = None
+        if props:
+            m = _ANCHOR_RE.search(props.group(0))
+            anchor = m.group(1) if m else None
+            raw = raw[props.end() :]
+        if not raw:
+            return
+        if raw.startswith("*"):
+            name = raw[1:].strip()
+            if name in self.anchors:
+                self.out.append(Scalar(path, self.anchors[name], line))
+            else:
+                self.out.append(Scalar(path, raw, line, alias=True))
+            return
+        value = _unquote(raw)
+        if anchor:
+            self.anchors[anchor] = value
+        self.out.append(Scalar(path, value, line))
+
+    # -- flow collections ---------------------------------------------------
+
+    def flow(self, path: tuple[str, ...], text: str, line: int) -> None:
+        """Read a flow mapping or sequence that starts at ``text[0]``."""
+        props = _PROPERTY_RE.match(text)
+        if props:
+            text = text[props.end() :]
+        self._flow_node(path, text, 0, line)
+
+    def _flow_node(self, path: tuple[str, ...], text: str, pos: int, line: int) -> int:
+        """Parse the flow node at ``pos``; return the index after it."""
+        pos = self._skip_space(text, pos)
+        if pos >= len(text):
+            return pos
+        opener = text[pos]
+        if opener not in "{[":
+            end = self._scalar_end(text, pos)
+            self.emit(path, text[pos:end], line + text.count("\n", 0, pos))
+            return end
+        closer = "}" if opener == "{" else "]"
+        pos += 1
+        while True:
+            pos = self._skip_space(text, pos)
+            if pos >= len(text):
+                return pos
+            if text[pos] == closer:
+                return pos + 1
+            if text[pos] == ",":
+                pos += 1
+                continue
+            if opener == "{":
+                key_end = self._key_end(text, pos)
+                if key_end is None:
+                    return len(text)
+                key = _unquote(text[pos:key_end])
+                pos = self._skip_space(text, key_end + 1)
+                if pos < len(text) and text[pos] in ",}":
+                    continue  # key with no value
+                pos = self._flow_node(path + (key,), text, pos, line)
+            else:
+                pos = self._flow_node(path + (ITEM,), text, pos, line)
+
+    @staticmethod
+    def _skip_space(text: str, pos: int) -> int:
+        while pos < len(text) and text[pos] in " \t\r\n":
+            pos += 1
+        return pos
+
+    @staticmethod
+    def _scalar_end(text: str, pos: int) -> int:
+        """Return the end of a flow scalar starting at ``pos``."""
+        if text[pos] in ("'", '"'):
+            quote = text[pos]
+            i = pos + 1
+            while i < len(text):
+                if quote == '"' and text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    if quote == "'" and text[i + 1 : i + 2] == "'":
+                        i += 2
+                        continue
+                    return i + 1
+                i += 1
+            return len(text)
+        i = pos
+        while i < len(text) and text[i] not in ",]}":
+            i += 1
+        return i
+
+    @staticmethod
+    def _key_end(text: str, pos: int) -> Optional[int]:
+        """Return the index of the ``:`` ending the flow key at ``pos``."""
+        if text[pos] in ("'", '"'):
+            end = _Reader._scalar_end(text, pos)
+            colon = _Reader._skip_space(text, end)
+            return colon if colon < len(text) and text[colon] == ":" else None
+        i = pos
+        while i < len(text):
+            ch = text[i]
+            if ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t\r\n,}]"):
+                return i
+            if ch in ",}]":
+                return None
+            i += 1
+        return None
+
+
+def scalars(content: str) -> list[Scalar]:
+    """Return every scalar in a YAML document stream, with its key path.
+
+    :param content: the file text.
+    """
+    reader = _Reader()
+    raw_lines = content.splitlines()
+    # (column, name, is_sequence_item)
+    stack: list[tuple[int, str, bool]] = []
+    # An open block scalar: (indent it must exceed, path, start line, folded,
+    # content lines).
+    block: Optional[tuple[int, tuple[str, ...], int, bool, list[str]]] = None
+    i = 0
+    while i < len(raw_lines):
+        lineno = i + 1
+        raw = raw_lines[i]
+        i += 1
+        stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+
+        if block is not None:
+            if not stripped or indent > block[0]:
+                block[4].append(raw)
+                continue
+            _emit_block(reader, block)
+            block = None
+
+        if stripped in ("---", "...") or stripped.startswith(("--- ", "%")):
+            stack = []
+            continue
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+
+        # 1. Sequence item markers: "- ", possibly several ("- - x").
+        col = indent
+        rest = line[indent:]
+        while rest == "-" or rest.startswith(("- ", "-\t")):
+            while stack and (
+                stack[-1][0] > col or (stack[-1][0] == col and stack[-1][2])
+            ):
+                stack.pop()
+            stack.append((col, ITEM, True))
+            step = 1 + len(rest[1:]) - len(rest[1:].lstrip())
+            col += step
+            rest = rest[step:]
+        if not rest:
+            continue
+
+        # 2. A mapping entry, or a bare scalar / flow collection.
+        entry = _split_key(rest)
+        if entry is None:
+            while stack and stack[-1][0] >= col and not stack[-1][2]:
+                stack.pop()
+            path = tuple(name for _, name, _ in stack)
+            value = rest
+            key_col = col
+        else:
+            key, value = entry
+            while stack and stack[-1][0] >= col:
+                stack.pop()
+            path = tuple(name for _, name, _ in stack) + (key,)
+            key_col = col
+
+        # 3. The value: nothing (a nested block follows), a block scalar,
+        #    a flow collection (joined across lines), or a plain scalar.
+        bare = _PROPERTY_RE.sub("", value + " ", count=1).strip() if value else ""
+        if not value or (
+            entry is not None and not bare and value.startswith(("&", "!"))
+        ):
+            if entry is not None:
+                stack.append((key_col, path[-1], False))
+            continue
+        if _BLOCK_SCALAR_RE.match(bare):
+            limit = key_col if entry is not None else max(key_col - 1, 0)
+            block = (limit, path, lineno, bare.startswith(">"), [])
+            continue
+        if bare.startswith(("{", "[")):
+            text = value
+            while _bracket_balance(text) > 0 and i < len(raw_lines):
+                text += "\n" + _strip_comment(raw_lines[i])
+                i += 1
+            reader.flow(path, text, lineno)
+            continue
+        if entry is None and not path:
+            continue  # a bare scalar document
+        reader.emit(path, value, lineno)
+
+    if block is not None:
+        _emit_block(reader, block)
+    return reader.out
+
+
+def _emit_block(
+    reader: _Reader, block: tuple[int, tuple[str, ...], int, bool, list[str]]
+) -> None:
+    """Record a block scalar's content as its key's value.
+
+    Literal (``|``) content keeps its line breaks; folded (``>``) content is
+    joined with spaces. Either way the content is stripped of indentation.
+    """
+    _, path, line, folded, raw_lines = block
+    lines = [ln.strip() for ln in raw_lines]
+    while lines and not lines[-1]:
+        lines.pop()
+    text = (" " if folded else "\n").join(ln for ln in lines if ln or not folded)
+    if text and path:
+        reader.out.append(Scalar(path, text, line))
