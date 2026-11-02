@@ -75,6 +75,117 @@ class TestPackageJsonGood:
         assert _check_empty(PackageJsonChecker()) == []
 
 
+class TestPackageJsonNonExactForms:
+    """npm range forms beyond ^ ~ > < must not pass as pinned."""
+
+    def setup_method(self):
+        self.findings = _check_fixture_dir(
+            PackageJsonChecker(),
+            "package_json/ranges",
+            extra_files={"package-lock.json"},
+        )
+        self.by_pkg = {f.message.split("'")[1]: f for f in self.findings}
+
+    def test_eleven_findings(self):
+        assert sorted(self.by_pkg) == list("abcdefghijk"), [
+            f.message for f in self.findings
+        ]
+
+    def test_wildcards_tags_and_ranges_not_exact_semver(self):
+        for pkg in "abcdefk":
+            assert "not exact semver" in self.by_pkg[pkg].message, pkg
+            assert not self.by_pkg[pkg].integrity
+
+    def test_git_sources_not_content_addressed(self):
+        """user/repo, scp-style git@ and ssh:// all fetch a moving ref."""
+        for pkg in "ghi":
+            assert "not content-addressed" in self.by_pkg[pkg].message, pkg
+            assert self.by_pkg[pkg].integrity
+
+    def test_alias_range_unpinned(self):
+        assert "unpinned version 'npm:other@^1.0.0'" in self.by_pkg["j"].message
+
+
+def _classify(version):
+    # type: (object) -> tuple
+    from pinstack.checkers.package_json import _is_unpinned
+
+    return _is_unpinned(version)
+
+
+class TestPackageJsonVersionAllowlist:
+    """Unit tests for the version-spec allowlist."""
+
+    _SHA = "ab12" * 10
+
+    def test_exact_semver_accepted(self):
+        for v in ("1.2.3", "0.0.0", "1.2.3-rc.1", "1.2.3+build.5", "v1.2.3", "=1.2.3"):
+            assert _classify(v) == (False, ""), v
+
+    def test_local_references_accepted(self):
+        for v in (
+            "workspace:*",
+            "file:../x",
+            "link:../x",
+            "portal:../x",
+            "./x",
+            "../x",
+            "/abs/x",
+            "~/x",
+        ):
+            assert _classify(v) == (False, ""), v
+
+    def test_alias_exact_accepted(self):
+        assert _classify("npm:other@1.0.0") == (False, "")
+        assert _classify("npm:@scope/other@1.0.0") == (False, "")
+
+    def test_alias_without_version_flagged(self):
+        assert _classify("npm:other") == (True, "not exact semver")
+        assert _classify("npm:@scope/other") == (True, "not exact semver")
+        assert _classify("npm:other@latest") == (True, "not exact semver")
+
+    def test_git_with_commit_sha_accepted(self):
+        for v in (
+            "git+https://github.com/u/r.git#" + self._SHA,
+            "git+ssh://git@github.com/u/r.git#" + self._SHA,
+            "github:u/r#" + self._SHA,
+            "u/r#" + self._SHA,
+        ):
+            assert _classify(v) == (False, ""), v
+
+    def test_git_with_moving_ref_flagged(self):
+        for v in (
+            "git+https://github.com/u/r.git",
+            "git+https://github.com/u/r.git#main",
+            "github:u/r#v1.0.0",
+            "u/r#semver:^1.0.0",
+            "u/r#" + self._SHA[:7],
+            "gitlab:u/r",
+            "git://github.com/u/r.git",
+        ):
+            assert _classify(v) == (True, "not content-addressed"), v
+
+    def test_tarball_url_flagged(self):
+        assert _classify("https://x.test/p.tgz") == (True, "not content-addressed")
+        assert _classify("https://x.test/p.tgz#" + self._SHA) == (
+            True,
+            "not content-addressed",
+        )
+
+    def test_comparator_ranges_unpinned(self):
+        for v in ("^1.0.0", "~1.0.0", ">=1.0.0", "<2", ">=1.0.0 <2.0.0"):
+            assert _classify(v) == (True, "unpinned version"), v
+
+    def test_other_forms_not_exact(self):
+        for v in ("*", "x", "", "  ", "latest", "next", "1", "1.2", "1.2.x", "1.x.x"):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
+    def test_non_string_flagged(self):
+        """npm rejects non-string specs; the gate must not treat them as pinned."""
+        for v in (None, 1, 1.5, {"version": "1.0.0"}):
+            assert _classify(v) == (True, "not exact semver"), repr(v)
+
+
 class TestPackageJsonBad:
     def setup_method(self):
         self.findings = _check_fixture_dir(PackageJsonChecker(), "package_json/bad")

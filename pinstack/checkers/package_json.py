@@ -4,17 +4,51 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from pinstack.core import Checker, Finding, FileIndex
 
-# Version prefixes that indicate a non-exact (unpinned) dependency.
-_UNPINNED_PREFIXES = ("^", "~", ">=", "<=", ">", "<")
+# npm accepts many range forms (``*``, ``latest``, ``1.x``, ``1``, hyphen and
+# ``||`` ranges, dist-tags, git shorthands). Rather than enumerate the bad
+# ones, a version spec passes only if it is one of the forms below; anything
+# else is a finding.
+#
+# Sources:
+#   - https://docs.npmjs.com/cli/configuring-npm/package-json#dependencies
+#   - https://github.com/npm/node-semver#ranges
+#   - https://github.com/npm/npm-package-arg
 
-# Local references that should not be flagged (resolved at install time).
-_SAFE_PREFIXES = ("workspace:", "file:")
+# Exact semver, optionally written with npm's tolerated "=" or "v" prefix.
+_EXACT_SEMVER_RE = re.compile(
+    r"^=?v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
 
-# URL-based sources that are not content-addressed and should be flagged.
-_URL_PREFIXES = ("http://", "https://", "git+", "git://", "github:")
+# Local references, resolved from the working tree at install time.
+_LOCAL_PREFIXES = ("workspace:", "file:", "link:", "portal:", "./", "../", "/", "~/")
+
+# Git sources. These are content-addressed only when the fragment is a full
+# 40-hex commit SHA; a branch, tag, or "#semver:" range can move.
+_GIT_PREFIXES = (
+    "git+",
+    "git://",
+    "git@",
+    "ssh://",
+    "github:",
+    "gitlab:",
+    "bitbucket:",
+    "gist:",
+)
+# "user/repo" GitHub shorthand, with an optional "#ref".
+_GITHUB_SHORTHAND_RE = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+(?:#.*)?$")
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+
+# Remote tarballs carry no integrity field in package.json.
+_URL_PREFIXES = ("http://", "https://")
+
+# Comparator prefixes that make a range rather than a version.
+_RANGE_PREFIXES = ("^", "~", ">=", "<=", ">", "<")
+
+_NOT_CONTENT_ADDRESSED = "not content-addressed"
 
 _DEP_SECTIONS = (
     "dependencies",
@@ -27,20 +61,60 @@ _DEP_SECTIONS = (
 _LOCK_FILES = frozenset(["package-lock.json", "yarn.lock", "pnpm-lock.yaml"])
 
 
-def _is_unpinned(version: str) -> tuple[bool, str]:
-    """Return (is_bad, reason) for a version string."""
-    if not version or not isinstance(version, str):
+def _is_git_source(version: str) -> bool:
+    return version.startswith(_GIT_PREFIXES) or bool(
+        _GITHUB_SHORTHAND_RE.match(version)
+    )
+
+
+def _registry_version_problem(version: str) -> str:
+    """Return why a registry version spec is not exact, or "" if it is."""
+    if _EXACT_SEMVER_RE.match(version):
+        return ""
+    if version.startswith(_RANGE_PREFIXES):
+        return "unpinned version"
+    return "not exact semver"
+
+
+def _is_unpinned(version: object) -> tuple[bool, str]:
+    """Return (is_bad, reason) for a dependency version spec.
+
+    ``reason`` is ``"not content-addressed"`` for git and URL sources (an
+    integrity problem), ``"unpinned version"`` for comparator ranges, and
+    ``"not exact semver"`` for every other spec that is not an exact version.
+    """
+    if not isinstance(version, str):
+        return True, "not exact semver"
+    version = version.strip()
+
+    # 1. Local references.
+    if version.startswith(_LOCAL_PREFIXES):
         return False, ""
-    for safe in _SAFE_PREFIXES:
-        if version.startswith(safe):
+
+    # 2. Registry alias: npm:<name>@<version>. Scoped names start with "@",
+    #    so the version follows the last "@".
+    if version.startswith("npm:"):
+        target = version[len("npm:") :]
+        at_pos = target.rfind("@")
+        if at_pos <= 0:
+            return True, "not exact semver"
+        reason = _registry_version_problem(target[at_pos + 1 :])
+        return bool(reason), reason
+
+    # 3. Git sources: only a full commit SHA pins the content.
+    if _is_git_source(version):
+        _, _, fragment = version.partition("#")
+        if _COMMIT_SHA_RE.match(fragment):
             return False, ""
-    for prefix in _URL_PREFIXES:
-        if version.startswith(prefix):
-            return True, "not content-addressed"
-    for prefix in _UNPINNED_PREFIXES:
-        if version.startswith(prefix):
-            return True, "unpinned version"
-    return False, ""
+        return True, _NOT_CONTENT_ADDRESSED
+
+    # 4. Remote tarballs.
+    if version.startswith(_URL_PREFIXES):
+        return True, _NOT_CONTENT_ADDRESSED
+
+    # 5. Registry versions.
+    reason = _registry_version_problem(version)
+    return bool(reason), reason
 
 
 def _extract_js_lock_names(full_path: str, lock_filename: str) -> set[str]:
@@ -151,15 +225,19 @@ class PackageJsonChecker(Checker):
                 for pkg, version in sorted(deps.items()):
                     is_bad, reason = _is_unpinned(version)
                     if is_bad:
-                        integrity = reason == "not content-addressed"
+                        integrity = reason == _NOT_CONTENT_ADDRESSED
+                        if reason == "not exact semver":
+                            template = "'{0}' in {1} has version '{3}', which is {2}; use an exact version"
+                        else:
+                            template = (
+                                "'{0}' in {1} has {2} '{3}'; use an exact version"
+                            )
                         findings.append(
                             Finding(
                                 checker=self.name,
                                 path=rel_path,
                                 line=0,
-                                message="'{}' in {} has {} '{}'; use an exact version".format(
-                                    pkg, section, reason, version
-                                ),
+                                message=template.format(pkg, section, reason, version),
                                 integrity=integrity,
                             )
                         )
