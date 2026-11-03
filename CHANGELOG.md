@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`--build-context NAME,NAME`** declares BuildKit named contexts that the build supplies with `docker buildx build --build-context NAME=...`. A Dockerfile may then refer to those names in `FROM`, `COPY`/`ADD --from` and `RUN --mount=from=` as it would a stage. In 0.3.0 such a reference was reported as an unpinned Docker Hub image, which is what BuildKit pulls if the build omits the flag, and there was no way to say otherwise. Names must be valid stage names, so a tagged image such as `alpine:3.18` cannot be declared, and the `# syntax=` frontend still needs a digest.
+
 ## 0.3.0 (2026-11-02)
 
 This release closes gaps where pinstack passed dependency references it should have reported. Nearly every checker is stricter, so **a repository that passes on 0.2.0 may fail on 0.3.0**. Read *Upgrading* before you roll it out.

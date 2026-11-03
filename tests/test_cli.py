@@ -294,3 +294,44 @@ class TestMaxFilesFlag:
             import shutil
 
             shutil.rmtree(d, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# --build-context flag
+# ---------------------------------------------------------------------------
+
+BUILD_CONTEXT_FIXTURE = os.path.join(
+    PROJECT_ROOT, "tests", "fixtures", "docker", "build_context"
+)
+
+
+class TestBuildContextFlag:
+    def test_undeclared_context_fails(self):
+        """Without the flag, the fixture's named-context references fail."""
+        result = _run([BUILD_CONTEXT_FIXTURE])
+        assert result.returncode == 1
+        assert "'python-common-deps'" in result.stdout
+
+    def test_declared_context_passes(self):
+        """Declaring python-common-deps leaves only the undeclared context."""
+        result = _run(["--build-context", "python-common-deps", BUILD_CONTEXT_FIXTURE])
+        assert result.returncode == 1
+        assert "'python-common-deps'" not in result.stdout
+        assert "'other-deps'" in result.stdout
+
+    def test_comma_separated_and_repeatable(self):
+        """Names may be comma-separated and the flag may be repeated."""
+        for args in (
+            ["--build-context", "python-common-deps,other-deps"],
+            ["--build-context", "python-common-deps", "--build-context", "other-deps"],
+        ):
+            result = _run(args + [BUILD_CONTEXT_FIXTURE])
+            assert result.returncode == 0, result.stdout
+            assert "0 findings" in result.stdout
+
+    def test_image_reference_rejected(self):
+        """A tagged image cannot be declared as a context."""
+        result = _run(["--build-context", "alpine:3.18", BUILD_CONTEXT_FIXTURE])
+        assert result.returncode == 2
+        assert "not a valid build context name" in result.stderr
+        assert "Traceback" not in result.stderr

@@ -621,3 +621,75 @@ class TestComposeReviewFollowUps:
             'services:\n  w:\n    image: "nginx' + _DIGEST + '\\n"\n'
         )
         assert "malformed @sha256: digest" in findings[0][1]
+
+
+# ---------------------------------------------------------------------------
+# Dockerfile: BuildKit named contexts (--build-context)
+# ---------------------------------------------------------------------------
+
+
+def _check_build_context(build_contexts):
+    # type: (frozenset) -> list
+    dirpath = os.path.join(DOCKER_FIXTURES, "build_context")
+    checker = DockerfileChecker()
+    checker.build_contexts = build_contexts
+    return [f.message for f in checker.check({dirpath: {"Dockerfile"}}, dirpath)]
+
+
+class TestDockerfileBuildContexts:
+    """A named context is skipped only when the scan declares it."""
+
+    def test_undeclared_contexts_are_images(self):
+        """Without a declaration, each named-context reference is reported."""
+        assert _check_build_context(frozenset()) == [
+            "COPY --from 'python-common-deps' is not pinned with @sha256: digest",
+            "RUN --mount from 'python-common-deps' is not pinned with @sha256: digest",
+            "COPY --from 'other-deps' is not pinned with @sha256: digest",
+            "FROM 'python-common-deps' is not pinned with @sha256: digest",
+        ]
+
+    def test_declared_context_is_skipped_everywhere(self):
+        """A declared name passes in FROM, COPY --from and RUN --mount=from=."""
+        assert _check_build_context(frozenset(["python-common-deps"])) == [
+            "COPY --from 'other-deps' is not pinned with @sha256: digest",
+        ]
+
+    def test_declaration_is_case_insensitive(self):
+        """References compare lower-cased, as stage names do."""
+        tmp = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "Dockerfile"), "w") as fh:
+                fh.write("FROM Common-Deps\n")
+            checker = DockerfileChecker()
+            checker.build_contexts = frozenset(["common-deps"])
+            assert checker.check({tmp: {"Dockerfile"}}, tmp) == []
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_syntax_frontend_is_never_a_context(self):
+        """The # syntax= frontend still needs a digest, even if declared."""
+        tmp = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "Dockerfile"), "w") as fh:
+                fh.write("# syntax=frontend\nFROM scratch\n")
+            checker = DockerfileChecker()
+            checker.build_contexts = frozenset(["frontend"])
+            messages = [f.message for f in checker.check({tmp: {"Dockerfile"}}, tmp)]
+            assert messages == [
+                "# syntax 'frontend' is not pinned with @sha256: digest"
+            ]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_context_name_validation(self):
+        """Only stage names are accepted; image references are rejected."""
+        from pinstack.checkers.dockerfile import build_context_name
+
+        assert build_context_name(" Python-Common-Deps ") == "python-common-deps"
+        assert build_context_name("deps.v2_x") == "deps.v2_x"
+        for bad in ("", "alpine:3.18", "ghcr.io/org/img", "img@sha256:aa", "1deps"):
+            try:
+                build_context_name(bad)
+            except ValueError:
+                continue
+            raise AssertionError("accepted {!r}".format(bad))

@@ -28,6 +28,19 @@ def _build_registry() -> CheckerRegistry:
     return reg
 
 
+def _build_context_names(value: str) -> list[str]:
+    """Parse ``--build-context NAME,NAME`` into validated, lower-cased names.
+
+    :raises argparse.ArgumentTypeError: when a name is not a valid stage name.
+    """
+    from pinstack.checkers.dockerfile import build_context_name
+
+    try:
+        return [build_context_name(x) for x in value.split(",")]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pinstack",
@@ -96,6 +109,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Additional directory names to skip during traversal (comma-separated)",
     )
     parser.add_argument(
+        "--build-context",
+        type=_build_context_names,
+        action="extend",
+        default=None,
+        metavar="NAME,NAME",
+        help=(
+            "BuildKit named contexts the build supplies with"
+            " 'docker buildx build --build-context NAME=...'; Dockerfiles may"
+            " refer to these like stages (comma-separated, repeatable)"
+        ),
+    )
+    parser.add_argument(
         "--list-checkers",
         action="store_true",
         default=False,
@@ -130,6 +155,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     except ValueError as exc:
         sys.stderr.write("Error: {}\n".format(exc))
         sys.exit(2)
+
+    if args.build_context:
+        from pinstack.checkers.dockerfile import DockerfileChecker
+
+        for checker in checkers:
+            if isinstance(checker, DockerfileChecker):
+                checker.build_contexts = frozenset(args.build_context)
 
     # Collect patterns from the selected checkers directly
     patterns = set()
