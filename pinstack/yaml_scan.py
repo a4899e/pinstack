@@ -84,13 +84,17 @@ def _quote_can_open(text: str, i: int) -> bool:
     return j < 0 or text[j] in "{[,:-?"
 
 
-def _outside_quotes(text: str) -> Iterator[tuple[int, str]]:
-    """Yield ``(index, char)`` for every character outside quoted scalars.
+def _scan_quotes(text: str, quote: str = "") -> tuple[list[tuple[int, str]], str]:
+    """Return the characters of ``text`` outside quoted scalars, and the quote
+    still open at its end.
 
     This is the one place quoting is decided, so comment stripping, key
     splitting and bracket counting always agree on where a string is.
+
+    :param quote: the quote character open at the start of ``text`` (a quoted
+        scalar continuing from an earlier line), or ``""``.
     """
-    quote = ""
+    outside: list[tuple[int, str]] = []
     i, n = 0, len(text)
     while i < n:
         ch = text[i]
@@ -109,16 +113,17 @@ def _outside_quotes(text: str) -> Iterator[tuple[int, str]]:
             quote = ch
             i += 1
             continue
-        yield i, ch
+        outside.append((i, ch))
         i += 1
+    return outside, quote
 
 
-def _strip_comment(line: str) -> str:
+def _strip_comment(line: str, quote: str = "") -> str:
     """Remove a ``#`` comment that is outside quotes.
 
     A ``#`` starts a comment at the start of the line or after whitespace.
     """
-    for i, ch in _outside_quotes(line):
+    for i, ch in _scan_quotes(line, quote)[0]:
         if ch == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i].rstrip()
     return line.rstrip()
@@ -154,7 +159,7 @@ def _split_key(text: str) -> Optional[tuple[str, str]]:
     """
     if text[:1] in ("{", "["):
         return None
-    for i, ch in _outside_quotes(text):
+    for i, ch in _scan_quotes(text)[0]:
         if ch == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
             key = text[:i].strip()
             if not key or key.startswith("?"):
@@ -163,15 +168,22 @@ def _split_key(text: str) -> Optional[tuple[str, str]]:
     return None
 
 
-def _bracket_balance(text: str) -> int:
-    """Return how many ``{``/``[`` are left open in ``text``, outside quotes."""
+def _bracket_balance(text: str, quote: str = "") -> tuple[int, str]:
+    """Return the net ``{``/``[`` opened in ``text`` outside quotes, and the
+    quote still open at its end."""
     depth = 0
-    for _, ch in _outside_quotes(text):
+    outside, quote = _scan_quotes(text, quote)
+    for _, ch in outside:
         if ch in "{[":
             depth += 1
         elif ch in "}]":
             depth -= 1
-    return depth
+    return depth, quote
+
+
+def _quote_closes(text: str) -> bool:
+    """Return True if the quoted scalar that starts ``text`` ends in it."""
+    return _scan_quotes(text[1:], text[0])[1] == ""
 
 
 class _Reader:
@@ -251,9 +263,23 @@ class _Reader:
                 pos = self._skip_space(text, key_end + 1)
                 if pos < len(text) and text[pos] in ",}":
                     continue  # key with no value
-                pos = self._flow_node(path + (key,), text, pos, line)
+                new_pos = self._flow_node(path + (key,), text, pos, line)
+                if new_pos <= pos:
+                    return len(text)  # malformed; stop rather than loop
+                pos = new_pos
             else:
-                pos = self._flow_node(path + (ITEM,), text, pos, line)
+                key_end = None if text[pos] in "{[" else self._key_end(text, pos)
+                if key_end is not None:
+                    # An implicit single-pair mapping: [key: value].
+                    key = _unquote(text[pos:key_end])
+                    new_pos = self._flow_node(
+                        path + (ITEM, key), text, key_end + 1, line
+                    )
+                else:
+                    new_pos = self._flow_node(path + (ITEM,), text, pos, line)
+                if new_pos <= pos:
+                    return len(text)  # malformed; stop rather than loop
+                pos = new_pos
 
     @staticmethod
     def _skip_space(text: str, pos: int) -> int:
@@ -301,6 +327,10 @@ class _Reader:
         return None
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
 def scalars(content: str) -> list[Scalar]:
     """Return every scalar in a YAML document stream, with its key path.
 
@@ -316,12 +346,26 @@ def scalars(content: str) -> list[Scalar]:
     # content lines).
     block: Optional[tuple[int, tuple[str, ...], int, bool, list[str]]] = None
     i = 0
+
+    def deeper_lines(owner: int) -> list[str]:
+        """Take the following lines indented deeper than ``owner`` (and blank
+        lines between them): the continuation of the current scalar."""
+        nonlocal i
+        taken: list[str] = []
+        while i < len(raw_lines):
+            nxt = raw_lines[i]
+            if nxt.strip() and _indent(nxt) <= owner:
+                break
+            taken.append(nxt)
+            i += 1
+        return taken
+
     while i < len(raw_lines):
         lineno = i + 1
         raw = raw_lines[i]
         i += 1
         stripped = raw.strip()
-        indent = len(raw) - len(raw.lstrip(" "))
+        indent = _indent(raw)
 
         if block is not None:
             if not stripped or indent > block[0]:
@@ -330,72 +374,109 @@ def scalars(content: str) -> list[Scalar]:
             _emit_block(reader, block)
             block = None
 
-        if stripped in ("---", "...") or stripped.startswith("%"):
+        # Document markers and directives count only at column 0.
+        if indent == 0 and (stripped in ("---", "...") or stripped.startswith("%")):
             stack = []
             continue
-        if stripped.startswith("--- "):
+        if indent == 0 and stripped.startswith("--- "):
             # Content after the document marker starts the new document.
             stack = []
             raw = stripped[4:].lstrip()
             stripped = raw.strip()
-            indent = 0
         line = _strip_comment(raw)
         if not line.strip():
             continue
+        indent = _indent(line)
 
         # 1. Sequence item markers: "- ", possibly several ("- - x").
         col = indent
         rest = line[indent:]
+        dash_col: Optional[int] = None
         while rest == "-" or rest.startswith(("- ", "-\t")):
             while stack and (
                 stack[-1][0] > col or (stack[-1][0] == col and stack[-1][2])
             ):
                 stack.pop()
             stack.append((col, ITEM, True))
+            dash_col = col
             step = 1 + len(rest[1:]) - len(rest[1:].lstrip())
             col += step
             rest = rest[step:]
         if not rest:
             continue
 
-        # 2. A mapping entry, or a bare scalar / flow collection.
+        # 2. A mapping entry, or a bare scalar / flow collection. ``owner``
+        #    is the column a continuation line must be deeper than.
         entry = _split_key(rest)
         if entry is None:
             while stack and stack[-1][0] >= col and not stack[-1][2]:
                 stack.pop()
             path = tuple(name for _, name, _ in stack)
             value = rest
-            key_col = col
+            if dash_col is not None:
+                owner = dash_col
+            else:
+                owner = stack[-1][0] if stack else -1
         else:
             key, value = entry
             while stack and stack[-1][0] >= col:
                 stack.pop()
             path = tuple(name for _, name, _ in stack) + (key,)
-            key_col = col
+            owner = col
 
         # 3. The value: nothing (a nested block follows), a block scalar,
-        #    a flow collection (joined across lines), or a plain scalar.
+        #    a flow collection, a quoted scalar or a plain scalar. The last
+        #    three may continue on deeper lines.
         bare = _PROPERTY_RE.sub("", value + " ", count=1).strip() if value else ""
         if not value or (
             entry is not None and not bare and value.startswith(("&", "!"))
         ):
             if entry is not None:
-                stack.append((key_col, path[-1], False))
+                stack.append((col, path[-1], False))
             continue
         if _BLOCK_SCALAR_RE.match(bare):
-            limit = key_col if entry is not None else max(key_col - 1, 0)
-            block = (limit, path, lineno, bare.startswith(">"), [])
+            block = (owner, path, lineno, bare.startswith(">"), [])
             continue
         if bare.startswith(("{", "[")):
             pieces = [value]
-            balance = _bracket_balance(value)
-            while balance > 0 and i < len(raw_lines):
-                piece = _strip_comment(raw_lines[i])
+            balance, quote = _bracket_balance(value)
+            while (balance > 0 or quote) and i < len(raw_lines):
+                nxt = raw_lines[i]
+                nxt_text = nxt.strip()
+                # A line at or left of the owner ends the collection, unless it
+                # only closes it (a JSON-style "]" back at the key's column).
+                if (
+                    nxt_text
+                    and _indent(nxt) <= owner
+                    and not quote
+                    and not nxt_text.startswith(("]", "}"))
+                ):
+                    break
+                piece = _strip_comment(nxt, quote)
+                delta, quote = _bracket_balance(piece, quote)
                 pieces.append(piece)
-                balance += _bracket_balance(piece)
+                balance += delta
                 i += 1
             reader.flow(path, "\n".join(pieces), lineno)
             continue
+        if bare[:1] in ("'", '"') and not _quote_closes(bare):
+            # A quoted scalar that continues to its closing quote.
+            pieces = [value]
+            quote = bare[0]
+            while quote and i < len(raw_lines):
+                nxt = raw_lines[i]
+                if nxt.strip() and _indent(nxt) <= owner:
+                    break
+                pieces.append(nxt.strip())
+                quote = _scan_quotes(nxt, quote)[1]
+                i += 1
+            value = " ".join(pieces)
+        elif owner >= 0:
+            # A plain scalar: deeper lines are more of the same text.
+            extra = [_strip_comment(ln).strip() for ln in deeper_lines(owner)]
+            extra = [ln for ln in extra if ln]
+            if extra:
+                value = " ".join([value] + extra)
         if entry is None and not path:
             continue  # a bare scalar document
         reader.emit(path, value, lineno)

@@ -323,3 +323,58 @@ class TestGHAReviewFollowUps:
 
         small, big = run(1000), run(4000)
         assert big < small * 12, (small, big)
+
+
+class TestGHASecondReview:
+    """Second local review of the L1/L3 change: multi-line scalars and flow."""
+
+    def test_plain_continuation_starting_with_bracket(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    container: node:20\n    steps:\n"
+            "      - run: echo\n          [x\n"
+            "      - uses: evil/act@main\n"
+        )
+        assert [line for line, _ in findings] == [3, 7]
+
+    def test_multiline_double_quoted_value(self):
+        findings = _workflow(
+            'jobs:\n  t:\n    steps:\n      - name: "a\n          {"\n'
+            "      - uses: evil/act@main\n"
+        )
+        assert [line for line, _ in findings] == [6]
+
+    def test_stray_closer_in_flow_sequence_terminates(self):
+        from pinstack.yaml_scan import scalars
+
+        scalars("steps: [ } ]\n")
+        scalars("jobs: {b: {steps: [a, }]}}\n")
+
+    def test_quoted_string_spanning_lines_in_flow(self):
+        findings = _workflow(
+            'jobs:\n  t:\n    env: {X: ["a\n      [" ]}\n    steps:\n'
+            "      - uses: evil/act@main\n"
+        )
+        assert [line for line, _ in findings] == [6]
+
+    def test_indented_marker_does_not_reset_path(self):
+        findings = _workflow(
+            "jobs:\n  b:\n    env:\n      A: x\n        %y\n    container: node:20\n"
+        )
+        assert [m for _, m in findings] == [
+            "container image 'node:20' is not pinned with @sha256: digest"
+        ]
+
+    def test_implicit_pair_in_flow_sequence(self):
+        findings = _workflow("jobs:\n  t:\n    steps: [uses: evil/act@main]\n")
+        assert [line for line, _ in findings] == [3]
+
+    def test_sequence_block_scalar_content_is_not_structure(self):
+        findings = _workflow("jobs:\n  t:\n    steps:\n    - |\n     uses: x\n")
+        assert findings == []
+
+    def test_matrix_variable_named_uses_is_data(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    strategy:\n      matrix:\n        include:\n"
+            "          - uses: foo\n"
+        )
+        assert findings == []

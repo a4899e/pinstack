@@ -4,10 +4,11 @@ Every ``image:`` value in a compose file must end in ``@sha256:`` and 64
 lowercase hex characters. The file is read with :mod:`pinstack.yaml_scan`,
 so flow style (``services: {web: {image: nginx:1.25}}``), quoted keys and
 values, and images set through a YAML anchor (``x-base: &base`` then
-``<<: *base``) are all seen. Inside a service (or an ``x-`` extension
-block), ``image`` keys under ``labels``, ``environment``, ``annotations``
-and ``build.args`` are data, not images, and are skipped; the service's own
-name never counts, so a service called ``labels`` is still checked.
+``<<: *base``, checked where the anchor is defined) are all seen. Every
+``image`` key is checked, wherever it sits, as the original line-based
+checker did: telling image references from data that happens to use the key
+(a label, a build arg) would need anchors and merges resolved, and guessing
+wrong would let an image through.
 
 Compose interpolates ``$VAR`` / ``${VAR}`` from the environment, so a
 reference whose digest is not written out literally is reported as
@@ -28,19 +29,6 @@ from pinstack.core import (
     image_digest_problem,
 )
 from pinstack.yaml_scan import UNRESOLVED_ALIAS, scalars
-
-_DATA_KEYS = frozenset(["labels", "environment", "annotations", "args"])
-
-
-def _is_data(path: tuple[str, ...]) -> bool:
-    """Return True if an ``image`` key at ``path`` is data, not an image.
-
-    Only keys below the service (``services.<name>.…``) or below a
-    top-level block (``x-base.…``) are looked at, so a service's own name
-    cannot hide it.
-    """
-    inner = path[2:-1] if path[:1] == ("services",) else path[1:-1]
-    return bool(_DATA_KEYS.intersection(inner))
 
 
 class ComposeChecker(Checker):
@@ -75,7 +63,7 @@ class ComposeChecker(Checker):
                     continue
 
                 for item in scalars(content):
-                    if item.key != "image" or _is_data(item.path):
+                    if item.key != "image":
                         continue
                     image = item.value
                     if item.alias:

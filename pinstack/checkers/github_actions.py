@@ -73,10 +73,13 @@ def _image_problem(image: str) -> Optional[str]:
 
 
 def _is_step_uses(path: tuple[str, ...]) -> bool:
-    """``...steps[n].uses`` or a reusable workflow's ``jobs.<id>.uses``."""
+    """``...steps[n].uses`` or a reusable workflow's ``jobs.<id>.uses``.
+
+    A ``uses`` key elsewhere (a matrix variable, an action input) is data.
+    """
     if not path or path[-1] != "uses":
         return False
-    if len(path) >= 2 and path[-2] == ITEM:
+    if path[-3:-1] == ("steps", ITEM):
         return True
     return len(path) == 3 and path[0] == "jobs"
 
