@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-03)
+
+This release adds one option, `--build-context`, for Dockerfiles that use BuildKit named contexts. Nothing else changes: if you don't pass the option, 0.4.0 reports exactly what 0.3.0 does.
+
+pinstack still has no runtime dependencies and still runs on Python 3.9 and later.
 
 ### Added
 
 - **`--build-context NAME,NAME`** declares BuildKit named contexts that the build supplies with `docker buildx build --build-context NAME=...`. A Dockerfile may then refer to those names in `FROM`, `COPY`/`ADD --from` and `RUN --mount=from=` as it would a stage. In 0.3.0 such a reference was reported as an unpinned Docker Hub image, which is what BuildKit pulls if the build omits the flag, and there was no way to say otherwise. Names must be valid stage names, so a tagged image such as `alpine:3.18` cannot be declared, and the `# syntax=` frontend still needs a digest.
+
+  The option is a claim about how the image is built, so set it in the same task runner or CI step that passes `--build-context` to `docker buildx`. For example, if CI runs `docker buildx build --build-context python-deps=./deps .`, run `pinstack . --build-context python-deps`. Names are comma-separated, the option may be repeated, and names are case-insensitive, as stage names are.
 
 ## 0.3.0 (2026-11-02)
 
