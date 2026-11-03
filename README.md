@@ -285,6 +285,7 @@ def build(c):
 
 pinstack runs anywhere Python 3.9+ is available. No virtual environment needed,
 no dependencies to install beyond pinstack itself.
+CI tests it on Python 3.11, 3.12, 3.13 and 3.14.
 
 **With pip:**
 
