@@ -122,6 +122,23 @@ def image_digest_problem(image: str) -> Optional[str]:
     return None
 
 
+def hex_digest_problem(algo: str, digest: str) -> Optional[str]:
+    """Return why ``digest`` is not a full hex digest for ``algo``, or None.
+
+    :param algo: a key of ``_HASH_ALGORITHMS`` (lower-case hashlib name).
+    """
+    expected_len = _HASH_ALGORITHMS[algo]
+    if not digest:
+        return "{} hash is empty".format(algo)
+    if not _HEX_RE.match(digest):
+        return "{} hash contains non-hex characters: {}".format(algo, digest)
+    if len(digest) != expected_len:
+        return "{} hash has wrong length: expected {} hex chars, got {}".format(
+            algo, expected_len, len(digest)
+        )
+    return None
+
+
 def validate_url_fragment_hashes(url: str) -> list[str]:
     """Validate hash key-value pairs in a URL fragment.
 
@@ -148,21 +165,8 @@ def validate_url_fragment_hashes(url: str) -> list[str]:
             continue  # skip non-hash fields like subdirectory=
 
         # This is the first hash field — validate it and return.
-        expected_len = _HASH_ALGORITHMS[key]
-
-        if not value:
-            return ["{} hash is empty".format(key)]
-        if not _HEX_RE.match(value):
-            return ["{} hash contains non-hex characters: {}".format(key, value)]
-        if len(value) != expected_len:
-            return [
-                "{} hash has wrong length: expected {} hex chars, got {}".format(
-                    key,
-                    expected_len,
-                    len(value),
-                )
-            ]
-        return []  # valid first hash
+        problem = hex_digest_problem(key, value)
+        return [problem] if problem else []
 
     return ["no hash algorithm found in URL fragment"]
 
