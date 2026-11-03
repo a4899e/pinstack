@@ -89,6 +89,39 @@ def is_commit_sha(ref: str) -> bool:
     return bool(_COMMIT_SHA_RE.match(ref))
 
 
+# An OCI image digest pin: "@sha256:" and exactly 64 lowercase hex characters,
+# ending the reference (name[:tag]@sha256:<hex>). \Z, not $, so a trailing
+# newline does not count as "the end".
+_IMAGE_DIGEST_RE = __import__("re").compile(r"@sha256:[0-9a-f]{64}\Z")
+
+# How checkers describe an image reference that interpolates a variable.
+IMAGE_VARIABLE_PROBLEM = (
+    "uses a variable reference which cannot be verified;"
+    " write the image reference with an @sha256: digest"
+)
+
+
+def image_digest_problem(image: str) -> Optional[str]:
+    """Return why a container image reference is not digest-pinned, or None.
+
+    A reference is pinned only when it ends in ``@sha256:`` followed by
+    exactly 64 lowercase hex characters, the form registries and the OCI
+    image spec use. Anything shorter, longer, upper-case or with text after
+    the digest does not name one image.
+
+    :param image: the image reference as written, e.g.
+        ``nginx:1.25@sha256:<hex>`` or ``docker://alpine@sha256:<hex>``.
+    """
+    if "@sha256:" not in image:
+        return "is not pinned with @sha256: digest"
+    if not _IMAGE_DIGEST_RE.search(image):
+        return (
+            "has a malformed @sha256: digest; expected 64 lowercase hex"
+            " characters at the end of the reference"
+        )
+    return None
+
+
 def hex_digest_problem(algo: str, digest: str) -> Optional[str]:
     """Return why ``digest`` is not a full hex digest for ``algo``, or None.
 

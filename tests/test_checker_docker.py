@@ -128,9 +128,16 @@ class TestDockerfileUnpinnedForms:
         self.findings = _check_dockerfile("unpinned_forms")
         self.by_line = {f.line: f.message for f in self.findings}
 
-    def test_five_findings(self):
-        """Bare image, $VAR, ${VAR}, continued FROM, and COPY --from=<image>."""
-        assert sorted(self.by_line) == [2, 3, 4, 5, 8], self.by_line
+    def test_six_findings(self):
+        """Bare image, $VAR, ${VAR}, continued FROM, a malformed digest, and COPY --from=<image>."""
+        assert sorted(self.by_line) == [2, 3, 4, 5, 7, 8], self.by_line
+
+    def test_short_digest_is_malformed(self):
+        """Review L3: `@sha256:aaaa` is not a digest; it names no single image."""
+        assert self.by_line[7] == (
+            "FROM 'golang@sha256:aaaa' has a malformed @sha256: digest; expected"
+            " 64 lowercase hex characters at the end of the reference"
+        )
 
     def test_bare_image_is_not_a_stage(self):
         """`FROM alpine` names no declared stage, so it pulls alpine:latest."""
@@ -508,3 +515,109 @@ class TestDockerfileHeredocAndEscapeEdgeCases:
         findings = _run_dockerfile("FROM \\\n  alpine\n")
         assert "'alpine'" in findings[0].message
         assert [f.line for f in findings] == [1]
+
+
+def _compose_text(text):
+    # type: (str) -> list
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "compose.yaml"), "w") as fh:
+            fh.write(text)
+        return [
+            (f.line, f.message)
+            for f in ComposeChecker().check({d: {"compose.yaml"}}, d)
+        ]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+class TestComposeYamlForms:
+    """Review repro L3: flow mappings bypassed the line regex; digests unchecked."""
+
+    def test_flow_mapping_repro(self):
+        findings = _check_compose("compose_flow")
+        assert [(f.line, f.message) for f in findings] == [
+            (1, "image 'nginx:1.25' is not pinned with @sha256: digest")
+        ]
+
+    def test_malformed_digest(self):
+        assert _compose_text("services:\n  w:\n    image: nginx@sha256:abc\n") == [
+            (
+                3,
+                "image 'nginx@sha256:abc' has a malformed @sha256: digest; expected"
+                " 64 lowercase hex characters at the end of the reference",
+            )
+        ]
+
+    def test_uppercase_digest_is_malformed(self):
+        findings = _compose_text(
+            "services:\n  w:\n    image: nginx@sha256:" + "A1B2C3D4" * 8 + "\n"
+        )
+        assert "malformed @sha256: digest" in findings[0][1]
+
+    def test_variables(self):
+        findings = _compose_text(
+            "services:\n"
+            "  a:\n    image: ${IMAGE}\n"
+            "  b:\n    image: ${REGISTRY}/app" + _DIGEST + "\n"
+            '  c:\n    image: "${IMG:-nginx' + _DIGEST + '}"\n'
+        )
+        assert [line for line, _ in findings] == [3, 7]
+        assert all("variable reference" in m for _, m in findings)
+
+    def test_anchored_image_checked_where_defined(self):
+        findings = _compose_text(
+            "x-base: &base\n  image: busybox:1\n"
+            "services:\n  a:\n    <<: *base\n  b:\n    image: *missing\n"
+        )
+        assert findings == [
+            (2, "image 'busybox:1' is not pinned with @sha256: digest"),
+            (7, "image '*missing' is a YAML alias pinstack could not resolve"),
+        ]
+
+    def test_expanded_alias_is_not_reported_twice(self):
+        """Copies made by expanding an alias were checked where anchored."""
+        findings = _compose_text(
+            "x-base: &base\n  image: busybox:1\n"
+            "services:\n  a: *base\n  b: {<<: *base}\n"
+        )
+        assert findings == [
+            (2, "image 'busybox:1' is not pinned with @sha256: digest"),
+        ]
+
+    def test_alias_of_scalar_on_next_line(self):
+        findings = _compose_text(
+            "x-img: &img\n  nginx:latest\nservices: {web: {image: *img}}\n"
+        )
+        assert findings == [
+            (3, "image 'nginx:latest' is not pinned with @sha256: digest")
+        ]
+
+    def test_too_deep_flow_is_reported(self):
+        findings = _compose_text("services: " + "{a: " * 500 + "1" + "}" * 500 + "\n")
+        assert [m for _, m in findings] == [
+            "compose.yaml has flow collections nested more than 100 deep,"
+            " which pinstack cannot read"
+        ]
+
+    def test_every_image_key_is_checked(self):
+        """labels/environment entries named image are checked too (fail closed)."""
+        findings = _compose_text(
+            "services:\n  a:\n    image: nginx" + _DIGEST + "\n"
+            "    labels:\n      image: fake\n"
+        )
+        assert [line for line, _ in findings] == [5]
+
+
+class TestComposeReviewFollowUps:
+    def test_service_named_like_a_data_key_is_checked(self):
+        assert _compose_text("services:\n  labels:\n    image: evil:latest\n") == [
+            (3, "image 'evil:latest' is not pinned with @sha256: digest")
+        ]
+
+    def test_text_after_digest_is_malformed(self):
+        """A quoted value ending in an escaped newline is not a digest pin."""
+        findings = _compose_text(
+            'services:\n  w:\n    image: "nginx' + _DIGEST + '\\n"\n'
+        )
+        assert "malformed @sha256: digest" in findings[0][1]
