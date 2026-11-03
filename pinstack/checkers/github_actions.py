@@ -17,7 +17,10 @@ composite steps and for a ``runs.image`` that pulls a ``docker://`` image.
 The files are read with :mod:`pinstack.yaml_scan`, so flow style
 (``- {uses: actions/checkout@v4}``), quoted keys (``"uses":``), values on
 the following line and YAML aliases are all seen; text inside a ``run: |``
-script is not mistaken for a key.
+script is not mistaken for a key. An alias of an anchored step, job or
+mapping is checked where it is used. An alias the reader could not resolve
+is reported wherever it could stand for something this checker checks (a
+job, a step, a container or a service), since what it stands for is unknown.
 """
 
 from __future__ import annotations
@@ -32,7 +35,13 @@ from pinstack.core import (
     image_digest_problem,
     is_commit_sha,
 )
-from pinstack.yaml_scan import ITEM, UNRESOLVED_ALIAS, Scalar, scalars
+from pinstack.yaml_scan import (
+    ITEM,
+    UNRESOLVED_ALIAS,
+    Scalar,
+    YamlTooDeep,
+    scalars,
+)
 
 _ACTION_FILES = ("action.yml", "action.yaml")
 
@@ -82,6 +91,31 @@ def _is_step_uses(path: tuple[str, ...]) -> bool:
     if path[-3:-1] == ("steps", ITEM):
         return True
     return len(path) == 3 and path[0] == "jobs"
+
+
+def _without_merge_keys(path: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop ``<<`` merge keys (and ``<<: [...]`` items): they merge in place."""
+    out: list[str] = []
+    for i, name in enumerate(path):
+        if name == "<<" or (name == ITEM and i > 0 and path[i - 1] == "<<"):
+            continue
+        out.append(name)
+    return tuple(out)
+
+
+def _holds_checked_values(path: tuple[str, ...], is_action: bool) -> bool:
+    """True if a node at ``path`` could contain a ``uses`` or an image we check."""
+    path = _without_merge_keys(path)
+    if is_action:
+        return path in ((), ("runs",), ("runs", "steps"), ("runs", "steps", ITEM))
+    if path in ((), ("jobs",)):
+        return True
+    if len(path) < 2 or path[0] != "jobs":
+        return False
+    rest = path[2:]
+    if rest in ((), ("steps",), ("steps", ITEM), ("container",), ("services",)):
+        return True
+    return len(rest) == 2 and rest[0] == "services"
 
 
 def _workflow_image(path: tuple[str, ...]) -> Optional[str]:
@@ -135,7 +169,22 @@ class GitHubActionsChecker(Checker):
                 except OSError:
                     continue
 
-                for item in scalars(content):
+                try:
+                    items = scalars(content)
+                except YamlTooDeep as exc:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=exc.line,
+                            message="{} has {}, which pinstack cannot read".format(
+                                fname, exc
+                            ),
+                            integrity=True,
+                        )
+                    )
+                    continue
+                for item in items:
                     message = self._problem(item, is_action)
                     if message:
                         findings.append(
@@ -158,9 +207,7 @@ class GitHubActionsChecker(Checker):
                 return "uses: '{}' {}".format(item.value, UNRESOLVED_ALIAS)
             return _action_ref_problem(item.value)
 
-        if is_action:
-            if path != ("runs", "image"):
-                return None
+        if is_action and path == ("runs", "image"):
             if item.alias:
                 return "docker action image '{}' {}".format(
                     item.value, UNRESOLVED_ALIAS
@@ -171,10 +218,16 @@ class GitHubActionsChecker(Checker):
                     return "docker action image '{}' {}".format(item.value, problem)
             return None
 
-        label = _workflow_image(path)
-        if label is None or not item.value:
-            return None
-        if item.alias:
-            return "{} '{}' {}".format(label, item.value, UNRESOLVED_ALIAS)
-        problem = _image_problem(item.value)
-        return "{} '{}' {}".format(label, item.value, problem) if problem else None
+        label = None if is_action else _workflow_image(path)
+        if label is not None and item.value:
+            if item.alias:
+                return "{} '{}' {}".format(label, item.value, UNRESOLVED_ALIAS)
+            problem = _image_problem(item.value)
+            return "{} '{}' {}".format(label, item.value, problem) if problem else None
+
+        # An alias standing for a whole job, step, container or service.
+        if item.alias and _holds_checked_values(path, is_action):
+            return "'{}' at {} {}".format(
+                item.value, ".".join(path) or "the top level", UNRESOLVED_ALIAS
+            )
+        return None

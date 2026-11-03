@@ -378,3 +378,91 @@ class TestGHASecondReview:
             "          - uses: foo\n"
         )
         assert findings == []
+
+
+class TestGHAStepAliases:
+    """Codex review of #19: an alias standing for a whole step or job."""
+
+    def test_repro_step_alias(self):
+        """The anchor sits in matrix data, but the alias is a real step."""
+        assert _scan("step_alias") == [
+            (
+                ".github/workflows/ci.yml",
+                12,
+                "action 'actions/checkout' is not pinned to a full-length SHA"
+                " (got 'v4')",
+            )
+        ]
+
+    def test_merged_step(self):
+        findings = _workflow(
+            "x-base: &base\n  uses: actions/cache@v4\n"
+            "jobs:\n  t:\n    steps:\n      - <<: *base\n        with: {}\n"
+        )
+        assert findings == [
+            (6, "action 'actions/cache' is not pinned to a full-length SHA (got 'v4')")
+        ]
+
+    def test_aliased_job_and_steps(self):
+        findings = _workflow(
+            "jobs:\n  a: &job\n    runs-on: x\n    steps: &steps\n"
+            "      - uses: actions/checkout@" + _SHA + "\n"
+            "    container: node:20\n"
+            "  b: *job\n"
+            "  c:\n    steps: *steps\n"
+        )
+        assert findings == [
+            (6, "container image 'node:20' is not pinned with @sha256: digest"),
+            (7, "container image 'node:20' is not pinned with @sha256: digest"),
+        ]
+
+    def test_unresolved_aliases_at_structural_positions(self):
+        findings = _workflow(
+            "jobs:\n  a: *j\n  b:\n    steps:\n      - *s\n      - <<: *m\n"
+            "    services: *svc\n    with:\n      x: *data\n"
+        )
+        assert findings == [
+            (2, "'*j' at jobs.a is a YAML alias pinstack could not resolve"),
+            (5, "'*s' at jobs.b.steps.- is a YAML alias pinstack could not resolve"),
+            (6, "'*m' at jobs.b.steps.-.<< is a YAML alias pinstack could not resolve"),
+            (7, "'*svc' at jobs.b.services is a YAML alias pinstack could not resolve"),
+        ]
+
+    def test_unresolved_step_alias_in_action(self):
+        import shutil
+        import tempfile
+
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "action.yml"), "w") as fh:
+                fh.write("runs:\n  using: composite\n  steps:\n    - *s\n")
+            findings = GitHubActionsChecker().check({d: {"action.yml"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == [
+            "'*s' at runs.steps.- is a YAML alias pinstack could not resolve"
+        ]
+
+    def test_too_deep_flow_is_reported(self):
+        findings = _workflow("jobs:\n  t:\n    steps: " + "[" * 500 + "]" * 500 + "\n")
+        assert findings == [
+            (
+                3,
+                "ci.yml has flow collections nested more than 100 deep, which"
+                " pinstack cannot read",
+            )
+        ]
+
+    def test_inner_anchor_of_same_name(self):
+        findings = _workflow(
+            "x: &a\n  y: &a actions/checkout@v4\n"
+            "jobs: {t: {runs-on: x, steps: [{uses: *a}]}}\n"
+        )
+        assert [line for line, _ in findings] == [3]
+
+    def test_anchored_flow_step_and_tagged_key(self):
+        findings = _workflow(
+            "jobs:\n  t:\n    steps:\n      - &c {uses: actions/checkout@v4}\n"
+            "      - !!str uses: actions/cache@v4\n"
+        )
+        assert [line for line, _ in findings] == [4, 5]

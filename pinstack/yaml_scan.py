@@ -18,12 +18,23 @@ instead:
   its key and is never read as keys, so text inside a ``run: |`` script
   cannot look like a ``uses:`` entry;
 - anchors (``&name``) and tags (``!tag``) before a value, and aliases
-  (``*name``), which are resolved to the anchored scalar when there is one;
+  (``*name``). An alias of a scalar is resolved to its value. An alias of a
+  mapping or sequence is expanded where it is used: each scalar under the
+  anchor is reported again under the alias's path (marked ``copied``), and
+  a merge key (``<<: *base``) merges into the mapping that holds it. Keys the
+  merging mapping overrides are not removed, so a merged value may be
+  reported although the mapping replaces it. As in YAML, an alias names the
+  most recent anchor of that name, and anchors do not carry across
+  documents. Expansion stops once the copies hold ``_MAX_COPIED`` path
+  elements in all, so nested aliases cannot make the output grow without
+  bound; aliases past that point are left unresolved;
 - several documents separated by ``---``.
 
 Anything it cannot read (a complex ``?`` key, a malformed flow collection)
 is skipped rather than guessed at. Callers that must fail closed should treat
-an alias they cannot resolve as unverifiable.
+an alias they cannot resolve as unverifiable. Flow collections nested more
+than ``MAX_FLOW_DEPTH`` deep raise :class:`YamlTooDeep` rather than
+exhausting the stack; callers should report the file as unreadable.
 """
 
 from __future__ import annotations
@@ -48,13 +59,17 @@ class Scalar:
         own key (or ``ITEM`` for a bare sequence entry).
     :ivar value: the scalar text, unquoted. For an alias that could not be
         resolved it is ``*name`` and ``alias`` is True.
-    :ivar line: the 1-based line the value starts on.
+    :ivar line: the 1-based line the value starts on; for a copy made by
+        expanding an alias, the alias's line.
+    :ivar copied: True for a copy made by expanding an alias of a mapping or
+        sequence; the same value was also reported where it was anchored.
     """
 
     path: tuple[str, ...]
     value: str
     line: int
     alias: bool = False
+    copied: bool = False
 
     @property
     def key(self) -> str:
@@ -64,6 +79,26 @@ class Scalar:
 _BLOCK_SCALAR_RE = re.compile(r"^[|>][0-9+-]*$")
 _PROPERTY_RE = re.compile(r"^(?:[&!][^\s,\[\]{}]*\s+)+")
 _ANCHOR_RE = re.compile(r"&([^\s,\[\]{}]+)")
+# Node properties at a position inside flow text (no ``^``: used with pos).
+_PROPERTIES_AT_RE = re.compile(r"(?:[&!][^\s,\[\]{}]*\s+)+")
+# The most path elements alias expansion may copy in one stream (each copy
+# costs the length of its path, so deep nesting counts against it).
+_MAX_COPIED = 1_000_000
+# The deepest flow nesting read; deeper raises YamlTooDeep.
+MAX_FLOW_DEPTH = 100
+
+
+class YamlTooDeep(ValueError):
+    """Flow collections are nested deeper than ``MAX_FLOW_DEPTH``.
+
+    :ivar line: the line the outermost flow collection starts on.
+    """
+
+    def __init__(self, line: int) -> None:
+        super().__init__(
+            "flow collections nested more than {} deep".format(MAX_FLOW_DEPTH)
+        )
+        self.line = line
 
 
 def _quote_can_open(text: str, i: int) -> bool:
@@ -190,7 +225,76 @@ class _Reader:
     def __init__(self) -> None:
         self.out: list[Scalar] = []
         self.anchors: dict[str, str] = {}
+        # Anchored mappings and sequences: name -> (the anchor's path, the
+        # start and end in ``out`` of the scalars under it, and the number of
+        # path elements below the anchor in them). ``out`` only grows, so the
+        # range stays valid.
+        self.collections: dict[str, tuple[tuple[str, ...], int, int, int]] = {}
+        self.copied = 0
+        # The order in which anchors open, so that a collection anchor,
+        # recorded only when it closes, does not replace a later one.
+        self._seq = 0
+        self._latest: dict[str, int] = {}
+        self._depth = 0  # flow collections currently open
         self._newlines: list[int] = []  # offsets of "\n" in the flow text
+
+    def open_anchor(self, name: str) -> int:
+        """Start a definition of ``&name``; return its place in document order.
+
+        Until it is recorded, an alias of the name is unresolved: an alias
+        inside its own anchor cannot be expanded.
+        """
+        self._seq += 1
+        self._latest[name] = self._seq
+        self.anchors.pop(name, None)
+        self.collections.pop(name, None)
+        return self._seq
+
+    def reset_anchors(self) -> None:
+        """Forget every anchor: a new document starts."""
+        self.anchors.clear()
+        self.collections.clear()
+        self._latest.clear()
+
+    def anchor_collection(
+        self, name: str, path: tuple[str, ...], start: int, seq: int
+    ) -> None:
+        """Record that the scalars emitted since ``start`` sit under ``&name``."""
+        if self._latest.get(name) != seq:
+            return  # a later anchor of the same name opened since
+        end = len(self.out)
+        if end - start == 1 and self.out[start].path == path:
+            # The anchor named a scalar on the following line ("k: &a" then
+            # an indented value): it is a scalar anchor.
+            item = self.out[start]
+            if not item.alias:
+                self.anchors[name] = item.value
+            return
+        depth = len(path)
+        below = sum(len(item.path) - depth for item in self.out[start:end])
+        self.collections[name] = (path, start, end, below)
+
+    def _expand(self, path: tuple[str, ...], name: str, line: int) -> bool:
+        """Copy an anchored collection's scalars to ``path``; False if over budget."""
+        anchor_path, start, end, below = self.collections[name]
+        # A merge key merges into the mapping that holds it.
+        if path[-1:] == ("<<",):
+            path = path[:-1]
+        elif path[-2:] == ("<<", ITEM):
+            path = path[:-2]
+        cost = (end - start) * len(path) + below
+        if self.copied + cost > _MAX_COPIED:
+            return False
+        self.copied += cost
+        depth = len(anchor_path)
+        for item in self.out[start:end]:
+            # A copy is marked only if it sits below the anchor, where the
+            # original was reported under the same last key.
+            copied = len(item.path) > depth
+            self.out.append(
+                Scalar(path + item.path[depth:], item.value, line, item.alias, copied)
+            )
+        return True
 
     # -- values -----------------------------------------------------------
 
@@ -209,29 +313,45 @@ class _Reader:
             name = raw[1:].strip()
             if name in self.anchors:
                 self.out.append(Scalar(path, self.anchors[name], line))
-            else:
+            elif name not in self.collections or not self._expand(path, name, line):
                 self.out.append(Scalar(path, raw, line, alias=True))
             return
         value = _unquote(raw)
         if anchor:
+            self.open_anchor(anchor)
             self.anchors[anchor] = value
         self.out.append(Scalar(path, value, line))
 
     # -- flow collections ---------------------------------------------------
 
     def flow(self, path: tuple[str, ...], text: str, line: int) -> None:
-        """Read a flow mapping or sequence that starts at ``text[0]``."""
-        props = _PROPERTY_RE.match(text)
-        if props:
-            text = text[props.end() :]
+        """Read a flow mapping or sequence that starts at ``text[0]``.
+
+        The text may begin with node properties (``&name {...}``).
+        """
         self._newlines = [i for i, ch in enumerate(text) if ch == "\n"]
-        self._flow_node(path, text, 0, line)
+        self._depth = 0
+        try:
+            self._flow_node(path, text, 0, line)
+        except RecursionError:
+            # Only reachable if the interpreter's limit is below MAX_FLOW_DEPTH.
+            raise YamlTooDeep(line) from None
 
     def _flow_node(self, path: tuple[str, ...], text: str, pos: int, line: int) -> int:
         """Parse the flow node at ``pos``; return the index after it."""
         pos = self._skip_space(text, pos)
         if pos >= len(text):
             return pos
+        if text[pos] in "&!":
+            props = _PROPERTIES_AT_RE.match(text, pos)
+            if props and text[props.end() : props.end() + 1] in ("{", "["):
+                anchor = _ANCHOR_RE.search(props.group(0))
+                seq = self.open_anchor(anchor.group(1)) if anchor else 0
+                start = len(self.out)
+                end = self._flow_node(path, text, props.end(), line)
+                if anchor:
+                    self.anchor_collection(anchor.group(1), path, start, seq)
+                return end
         opener = text[pos]
         if opener not in "{[":
             end = self._scalar_end(text, pos)
@@ -239,6 +359,19 @@ class _Reader:
                 path, text[pos:end], line + bisect.bisect_left(self._newlines, pos)
             )
             return end
+        self._depth += 1
+        if self._depth > MAX_FLOW_DEPTH:
+            raise YamlTooDeep(line)
+        try:
+            return self._flow_collection(path, text, pos, line)
+        finally:
+            self._depth -= 1
+
+    def _flow_collection(
+        self, path: tuple[str, ...], text: str, pos: int, line: int
+    ) -> int:
+        """Parse the flow mapping or sequence opening at ``pos``."""
+        opener = text[pos]
         closer = "}" if opener == "{" else "]"
         pos += 1
         while True:
@@ -250,8 +383,10 @@ class _Reader:
             if text[pos] == ",":
                 pos += 1
                 continue
+            # Properties before a key belong to the key, not its value.
+            key_start = self._after_properties(text, pos)
             if opener == "{":
-                key_end = self._key_end(text, pos)
+                key_end = self._key_end(text, key_start)
                 if key_end is None:
                     # A key with no value ({a, b: c}) is a null entry.
                     end = self._scalar_end(text, pos)
@@ -259,7 +394,7 @@ class _Reader:
                         pos = end
                         continue
                     return len(text)
-                key = _unquote(text[pos:key_end])
+                key = _unquote(text[key_start:key_end])
                 pos = self._skip_space(text, key_end + 1)
                 if pos < len(text) and text[pos] in ",}":
                     continue  # key with no value
@@ -268,10 +403,14 @@ class _Reader:
                     return len(text)  # malformed; stop rather than loop
                 pos = new_pos
             else:
-                key_end = None if text[pos] in "{[" else self._key_end(text, pos)
+                key_end = (
+                    None
+                    if text[key_start : key_start + 1] in ("{", "[")
+                    else self._key_end(text, key_start)
+                )
                 if key_end is not None:
                     # An implicit single-pair mapping: [key: value].
-                    key = _unquote(text[pos:key_end])
+                    key = _unquote(text[key_start:key_end])
                     new_pos = self._flow_node(
                         path + (ITEM, key), text, key_end + 1, line
                     )
@@ -280,6 +419,14 @@ class _Reader:
                 if new_pos <= pos:
                     return len(text)  # malformed; stop rather than loop
                 pos = new_pos
+
+    @staticmethod
+    def _after_properties(text: str, pos: int) -> int:
+        """Return the index after any node properties (``&a !t``) at ``pos``."""
+        if text[pos] not in "&!":
+            return pos
+        props = _PROPERTIES_AT_RE.match(text, pos)
+        return props.end() if props else pos
 
     @staticmethod
     def _skip_space(text: str, pos: int) -> int:
@@ -340,8 +487,25 @@ def scalars(content: str) -> list[Scalar]:
     if content.startswith("\ufeff"):
         content = content[1:]
     raw_lines = content.splitlines()
-    # (column, name, is_sequence_item)
-    stack: list[tuple[int, str, bool]] = []
+    # (column, name, is_sequence_item, anchor). The anchor of a mapping or
+    # sequence is (name, its path, len(reader.out) when it opened, its order);
+    # it is recorded when the entry is popped, once all its content is read.
+    stack: list[
+        tuple[int, str, bool, Optional[tuple[str, tuple[str, ...], int, int]]]
+    ] = []
+
+    def pop() -> None:
+        anchor = stack.pop()[3]
+        if anchor is not None:
+            reader.anchor_collection(*anchor)
+
+    def pop_all() -> None:
+        while stack:
+            pop()
+
+    def names() -> tuple[str, ...]:
+        return tuple(entry[1] for entry in stack)
+
     # An open block scalar: (indent it must exceed, path, start line, folded,
     # content lines).
     block: Optional[tuple[int, tuple[str, ...], int, bool, list[str]]] = None
@@ -376,11 +540,13 @@ def scalars(content: str) -> list[Scalar]:
 
         # Document markers and directives count only at column 0.
         if indent == 0 and (stripped in ("---", "...") or stripped.startswith("%")):
-            stack = []
+            pop_all()
+            reader.reset_anchors()
             continue
         if indent == 0 and stripped.startswith("--- "):
             # Content after the document marker starts the new document.
-            stack = []
+            pop_all()
+            reader.reset_anchors()
             raw = stripped[4:].lstrip()
             stripped = raw.strip()
         line = _strip_comment(raw)
@@ -396,8 +562,8 @@ def scalars(content: str) -> list[Scalar]:
             while stack and (
                 stack[-1][0] > col or (stack[-1][0] == col and stack[-1][2])
             ):
-                stack.pop()
-            stack.append((col, ITEM, True))
+                pop()
+            stack.append((col, ITEM, True, None))
             dash_col = col
             step = 1 + len(rest[1:]) - len(rest[1:].lstrip())
             col += step
@@ -407,11 +573,14 @@ def scalars(content: str) -> list[Scalar]:
 
         # 2. A mapping entry, or a bare scalar / flow collection. ``owner``
         #    is the column a continuation line must be deeper than.
-        entry = _split_key(rest)
+        # Properties before a key belong to the key ("- &a uses: x" is the
+        # key uses); before anything else they stay with the value.
+        key_props = _PROPERTY_RE.match(rest)
+        entry = _split_key(rest[key_props.end() :] if key_props else rest)
         if entry is None:
             while stack and stack[-1][0] >= col and not stack[-1][2]:
-                stack.pop()
-            path = tuple(name for _, name, _ in stack)
+                pop()
+            path = names()
             value = rest
             if dash_col is not None:
                 owner = dash_col
@@ -420,19 +589,28 @@ def scalars(content: str) -> list[Scalar]:
         else:
             key, value = entry
             while stack and stack[-1][0] >= col:
-                stack.pop()
-            path = tuple(name for _, name, _ in stack) + (key,)
+                pop()
+            path = names() + (key,)
             owner = col
 
         # 3. The value: nothing (a nested block follows), a block scalar,
         #    a flow collection, a quoted scalar or a plain scalar. The last
         #    three may continue on deeper lines.
         bare = _PROPERTY_RE.sub("", value + " ", count=1).strip() if value else ""
-        if not value or (
-            entry is not None and not bare and value.startswith(("&", "!"))
-        ):
+        if not bare:
+            # Nothing, or only properties: a nested block (if any) follows,
+            # and an anchor here names that block.
+            anchor_m = _ANCHOR_RE.search(value) if value else None
+            anchor = None
+            if anchor_m:
+                name = anchor_m.group(1)
+                anchor = (name, path, len(reader.out), reader.open_anchor(name))
             if entry is not None:
-                stack.append((col, path[-1], False))
+                stack.append((col, path[-1], False, anchor))
+            elif anchor and dash_col is not None and stack and stack[-1][2]:
+                # "- &name" alone: the anchor names the item's content.
+                c, n, item, _ = stack.pop()
+                stack.append((c, n, item, anchor))
             continue
         if _BLOCK_SCALAR_RE.match(bare):
             block = (owner, path, lineno, bare.startswith(">"), [])
@@ -483,6 +661,7 @@ def scalars(content: str) -> list[Scalar]:
 
     if block is not None:
         _emit_block(reader, block)
+    pop_all()
     return reader.out
 
 

@@ -91,10 +91,10 @@ class TestAnchorsAndDocuments:
             ("c", "*nope", 3, True),
         ]
 
-    def test_anchor_on_mapping_keeps_nesting(self):
+    def test_merge_key_expands_anchored_mapping(self):
         assert _rows("base: &b\n  image: i\nsvc:\n  <<: *b\n") == [
             ("base.image", "i", 2, False),
-            ("svc.<<", "*b", 4, True),
+            ("svc.image", "i", 4, False),
         ]
 
     def test_documents_reset_the_path(self):
@@ -105,3 +105,127 @@ class TestAnchorsAndDocuments:
 
     def test_item_marker(self):
         assert ITEM == "-"
+
+
+def _copied(text):
+    # type: (str) -> list
+    return [(".".join(s.path), s.value, s.line) for s in scalars(text) if s.copied]
+
+
+class TestCollectionAliases:
+    """Codex review of #19: an alias of a mapping or sequence is expanded where used."""
+
+    def test_anchor_alone_on_item_names_its_mapping(self):
+        text = "a:\n  - &x\n    k: v\nb:\n  - *x\n"
+        assert _rows(text) == [("a.-.k", "v", 3, False), ("b.-.k", "v", 5, False)]
+        assert _copied(text) == [("b.-.k", "v", 5)]
+
+    def test_anchored_sequence(self):
+        text = "a: &s\n  - k: 1\n  - k: 2\nb: *s\n"
+        assert _copied(text) == [("b.-.k", "1", 4), ("b.-.k", "2", 4)]
+
+    def test_flow_anchor(self):
+        text = "a: {x: &f {image: i}, y: *f}\n"
+        assert _rows(text) == [
+            ("a.x.image", "i", 1, False),
+            ("a.y.image", "i", 1, False),
+        ]
+
+    def test_merge_list(self):
+        text = "a: &a\n  p: 1\nb: &b\n  q: 2\nc:\n  <<: [*a, *b]\n"
+        assert _copied(text) == [("c.p", "1", 6), ("c.q", "2", 6)]
+
+    def test_nested_aliases_expand(self):
+        text = "a: &a\n  k: v\nb: &b\n  m: *a\nc: *b\n"
+        assert _copied(text)[-1] == ("c.m.k", "v", 5)
+
+    def test_alias_inside_its_own_anchor_is_unresolved(self):
+        assert _rows("a: &a\n  b: *a\n") == [("a.b", "*a", 2, True)]
+
+    def test_scalar_anchor_replaces_collection_anchor(self):
+        text = "a: &x\n  k: v\nb: &x s\nc: *x\n"
+        assert _rows(text)[-1] == ("c", "s", 4, False)
+
+    def test_expansion_is_bounded(self):
+        """Nested aliases cannot make the output grow without bound."""
+        from pinstack.yaml_scan import _MAX_COPIED
+
+        lines = ["l0: &l0 [" + ", ".join(["x"] * 10) + "]"]
+        for n in range(1, 8):
+            lines.append(
+                "l{}: &l{} [{}]".format(n, n, ", ".join(["*l{}".format(n - 1)] * 10))
+            )
+        rows = scalars("\n".join(lines) + "\n")
+        assert sum(s.copied for s in rows) <= _MAX_COPIED
+        assert any(s.alias for s in rows)
+
+
+class TestFlowDepth:
+    """Deep flow nesting is reported, not a crash."""
+
+    def test_too_deep_raises(self):
+        import pytest
+
+        from pinstack.yaml_scan import MAX_FLOW_DEPTH, YamlTooDeep
+
+        with pytest.raises(YamlTooDeep) as exc:
+            scalars("a: 1\nb: " + "[" * 5000 + "]" * 5000 + "\n")
+        assert exc.value.line == 2
+        depth = MAX_FLOW_DEPTH
+        assert _rows("a: " + "[" * depth + "x" + "]" * depth + "\n") == [
+            ("a" + ".-" * depth, "x", 1, False)
+        ]
+
+    def test_anchored_nesting_counts_once_per_collection(self):
+        from pinstack.yaml_scan import MAX_FLOW_DEPTH
+
+        depth = MAX_FLOW_DEPTH
+        text = "a: " + "&n [" * depth + "x" + "]" * depth + "\n"
+        assert [s.value for s in scalars(text)] == ["x"]
+
+
+class TestAnchorReview:
+    """Local review of the collection-alias change."""
+
+    def test_anchor_naming_scalar_on_next_line(self):
+        text = "x-img: &img\n  nginx:latest\ny: *img\n"
+        assert _rows(text)[-1] == ("y", "nginx:latest", 3, False)
+
+    def test_later_inner_anchor_wins(self):
+        text = "x: &a\n  y: &a inner\nz: *a\n"
+        assert _rows(text)[-1] == ("z", "inner", 3, False)
+        text = "x: &a\n  y: &a\n    uses: u\nz:\n  - *a\n"
+        assert _copied(text) == [("z.-.uses", "u", 5)]
+
+    def test_anchors_do_not_cross_documents(self):
+        assert _rows("a: &x v\n---\nb: *x\n")[-1] == ("b", "*x", 3, True)
+
+    def test_properties_before_a_key(self):
+        assert _rows("s:\n  - &c uses: u\n  - !!str k: v\n") == [
+            ("s.-.uses", "u", 2, False),
+            ("s.-.k", "v", 3, False),
+        ]
+        assert _rows("x: &c\n  !!str uses: u\n") == [("x.uses", "u", 2, False)]
+
+    def test_properties_before_a_flow_item(self):
+        assert _rows("s:\n  - &c {uses: u}\n") == [("s.-.uses", "u", 2, False)]
+        assert _rows("s: [&c {uses: u}, !!map {k: v}, *c]\n") == [
+            ("s.-.uses", "u", 1, False),
+            ("s.-.k", "v", 1, False),
+            ("s.-.uses", "u", 1, False),
+        ]
+        assert _rows("m: {&k a: 1}\n") == [("m.a", "1", 1, False)]
+
+    def test_budget_counts_path_length(self):
+        """Deeply nested copies are charged for their whole path."""
+        from pinstack.yaml_scan import _MAX_COPIED
+
+        deep = "".join("  " * i + "k{}:\n".format(i) for i in range(400))
+        items = "".join("  " * 400 + "- v\n" for _ in range(100))
+        anchor = "a: &a\n" + "".join(
+            "  " + line + "\n" for line in (deep + items).splitlines()
+        )
+        aliases = "".join("b{}: *a\n".format(n) for n in range(100))
+        rows = scalars(anchor + aliases)
+        assert sum(len(r.path) for r in rows if r.copied) <= _MAX_COPIED
+        assert any(r.alias for r in rows)

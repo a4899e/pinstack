@@ -28,7 +28,7 @@ from pinstack.core import (
     FileIndex,
     image_digest_problem,
 )
-from pinstack.yaml_scan import UNRESOLVED_ALIAS, scalars
+from pinstack.yaml_scan import UNRESOLVED_ALIAS, YamlTooDeep, scalars
 
 
 class ComposeChecker(Checker):
@@ -62,8 +62,25 @@ class ComposeChecker(Checker):
                 except OSError:
                     continue
 
-                for item in scalars(content):
-                    if item.key != "image":
+                try:
+                    items = scalars(content)
+                except YamlTooDeep as exc:
+                    findings.append(
+                        Finding(
+                            checker=self.name,
+                            path=rel_path,
+                            line=exc.line,
+                            message="{} has {}, which pinstack cannot read".format(
+                                fname, exc
+                            ),
+                            integrity=True,
+                        )
+                    )
+                    continue
+                for item in items:
+                    # A copy made by expanding an alias was already checked
+                    # where it was anchored, since every image key is.
+                    if item.key != "image" or item.copied:
                         continue
                     image = item.value
                     if item.alias:

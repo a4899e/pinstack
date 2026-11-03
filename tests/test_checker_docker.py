@@ -575,6 +575,31 @@ class TestComposeYamlForms:
             (7, "image '*missing' is a YAML alias pinstack could not resolve"),
         ]
 
+    def test_expanded_alias_is_not_reported_twice(self):
+        """Copies made by expanding an alias were checked where anchored."""
+        findings = _compose_text(
+            "x-base: &base\n  image: busybox:1\n"
+            "services:\n  a: *base\n  b: {<<: *base}\n"
+        )
+        assert findings == [
+            (2, "image 'busybox:1' is not pinned with @sha256: digest"),
+        ]
+
+    def test_alias_of_scalar_on_next_line(self):
+        findings = _compose_text(
+            "x-img: &img\n  nginx:latest\nservices: {web: {image: *img}}\n"
+        )
+        assert findings == [
+            (3, "image 'nginx:latest' is not pinned with @sha256: digest")
+        ]
+
+    def test_too_deep_flow_is_reported(self):
+        findings = _compose_text("services: " + "{a: " * 500 + "1" + "}" * 500 + "\n")
+        assert [m for _, m in findings] == [
+            "compose.yaml has flow collections nested more than 100 deep,"
+            " which pinstack cannot read"
+        ]
+
     def test_every_image_key_is_checked(self):
         """labels/environment entries named image are checked too (fail closed)."""
         findings = _compose_text(
