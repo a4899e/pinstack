@@ -9,13 +9,23 @@ Files pulled in with ``-r``/``--requirement`` are checked with the same
 rules, resolved relative to the including file, even when their names do
 not match ``requirements*.txt`` (``-r reqs/base.txt``, Django-style
 ``requirements/base.txt``). An include that cannot be checked is reported:
-one that is missing, outside the scan root (also through a symlink), a URL,
-or built from a ``${VAR}`` that pip expands from the environment. Each file
-is checked once, so include cycles terminate.
+one that is missing or unreadable, outside the scan root (also through a
+symlink), an ``http(s):`` URL, or built from a ``${VAR}`` that pip expands
+from the environment. ``file:`` includes are local paths. As in pip, a line
+includes at most one file (the first ``-r``, else the first ``-c``), and
+only when it is not itself a requirement. Each file is checked once, so
+include cycles terminate.
 
-``-c``/``--constraint`` files are not checked: constraints install nothing
-and only narrow the versions of packages that are installed for another
-reason, which the requirement lines (pinned and hashed) already decide.
+The requirement lines of a ``-c``/``--constraint`` file are not checked:
+constraints install nothing and only narrow the versions of packages that
+are installed for another reason, which the requirement lines (pinned and
+hashed) already decide. Its ``-r`` lines are still followed, because pip
+reads a ``-r`` inside a constraints file as a real requirements file.
+
+A requirement must be ``name==version`` (spaces around ``==`` allowed), a
+``name @ url`` direct reference, or a bare URL or local path, and the last
+two are pinned only by a valid ``--hash`` (or a git commit SHA). Anything
+else pip would install, such as a ``${VAR}`` requirement, is reported.
 
 Lines are read the way pip reads them (``pip._internal.req.req_file``):
 continuation lines are joined, except that a comment line never continues;
@@ -34,6 +44,7 @@ import fnmatch
 import os
 import re
 import shlex
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -62,6 +73,12 @@ _SPECIFIER_RE = re.compile(
 _COMMENT_RE = re.compile(r"(^|\s+)#.*$")
 _ENV_VAR_RE = re.compile(r"\$\{[A-Z0-9_]+\}")
 _URL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+# pip's SCHEME_RE for include targets: only these are fetched as URLs.
+_INCLUDE_SCHEME_RE = re.compile(r"^(http|https|file):", re.IGNORECASE)
+# A requirement that names a file or directory rather than a project.
+_PATH_RE = re.compile(
+    r"^(?:\.|/|~|[A-Za-z]:[\\/])|[\\/]|\.(?:whl|zip|tar\.gz|tgz|tar\.bz2)$"
+)
 
 # Algorithms pip accepts for --hash (pip._internal.utils.hashes.STRONG_HASHES).
 _PIP_HASH_ALGORITHMS = ("sha256", "sha384", "sha512")
@@ -112,7 +129,7 @@ class _Line:
 class _LineResult:
     """What one logical requirements line means for the gate."""
 
-    kind: str  # skip | ok | pin_error | hash_missing | hash_invalid
+    kind: str  # skip | ok | pin_error | hash_missing | hash_invalid | unverifiable
     package: str = ""
     detail: str = ""
 
@@ -128,8 +145,9 @@ def _logical_lines(raw_lines: list[str]) -> list[tuple[str, int]]:
     start = 0
     for lineno, raw in enumerate(raw_lines, start=1):
         line = raw.rstrip("\r\n")
-        if not line.endswith("\\") or _COMMENT_RE.match(line):
-            if _COMMENT_RE.match(line):
+        is_comment = _COMMENT_RE.match(line) is not None
+        if not line.endswith("\\") or is_comment:
+            if is_comment:
                 line = " " + line  # keep it a comment once joined
             if pending:
                 pending.append(line)
@@ -222,10 +240,12 @@ def _hash_problem(value: str) -> Optional[str]:
     return "'{}': {}".format(value, problem) if problem else None
 
 
-def _hash_result(line: _Line, pkg_name: str) -> _LineResult:
+def _hash_result(
+    line: _Line, pkg_name: str, missing: str = "hash_missing"
+) -> _LineResult:
     values = line.values("hash")
     if not values:
-        return _LineResult("hash_missing", pkg_name)
+        return _LineResult(missing, pkg_name)
     problems = [p for p in (_hash_problem(v) for v in values) if p]
     if problems:
         return _LineResult("hash_invalid", pkg_name, detail=problems[0])
@@ -237,6 +257,8 @@ def _requirement_result(line: _Line) -> _LineResult:
     spec = line.requirement
     if not spec:
         return _LineResult("skip")
+    if _ENV_VAR_RE.search(spec):
+        return _LineResult("unverifiable", spec)
 
     # PEP 508 direct references: "package @ URL". Only an immutable commit
     # SHA, a valid --hash, or a valid URL-fragment hash pins one.
@@ -250,18 +272,20 @@ def _requirement_result(line: _Line) -> _LineResult:
                 return _LineResult("skip")
             return _LineResult("pin_error", pkg_name)
         if line.values("hash"):
-            result = _hash_result(line, pkg_name)
-            return _LineResult("skip") if result.kind == "ok" else result
+            return _hash_result(line, pkg_name, missing="pin_error")
         if not validate_url_fragment_hashes(url_part):
             return _LineResult("skip")
         return _LineResult("pin_error", pkg_name)
 
-    if _URL_RE.match(spec) or spec.startswith("git+"):
-        return _LineResult("pin_error", spec)
+    # A bare URL or a local file/directory: pinned only by --hash.
+    if _URL_RE.match(spec) or spec.startswith("git+") or _PATH_RE.search(spec):
+        if spec.startswith("git+"):
+            return _LineResult("pin_error", spec)
+        return _hash_result(line, spec, missing="pin_error")
 
-    m = _SPECIFIER_RE.match(spec.split()[0])
+    m = _SPECIFIER_RE.match(spec)
     if not m:
-        return _LineResult("skip")
+        return _LineResult("pin_error", spec)
     pkg_name, operator, version = m.group(1), m.group(2) or "", m.group(3) or ""
     # ==2.* is a prefix match, not a pin.
     if operator == "==" and version and "*" not in version:
@@ -269,9 +293,13 @@ def _requirement_result(line: _Line) -> _LineResult:
     return _LineResult("pin_error", pkg_name)
 
 
-def _analyze_line(text: str) -> list[_LineResult]:
-    """Return the gate results for one logical line (requirement and editables)."""
-    line = _split_line(text)
+def _analyze_line(text: str, line: Optional[_Line] = None) -> list[_LineResult]:
+    """Return the gate results for one logical line (requirement and editables).
+
+    :param line: the already-split line, if the caller has it.
+    """
+    if line is None:
+        line = _split_line(text)
     if line is None:
         return []
     results = [_requirement_result(line)]
@@ -291,56 +319,90 @@ class RequirementsChecker(Checker):
     def check(self, index: FileIndex, root: str) -> list[Finding]:
         findings: list[Finding] = []
         root_real = os.path.realpath(root)
-        checked: set[str] = set()
-        # Indexed files first; included files are queued behind them.
-        queue: collections.deque[str] = collections.deque(
-            os.path.join(dir_path, fname)
-            for dir_path in sorted(index.keys())
-            for fname in sorted(index[dir_path])
-            if any(fnmatch.fnmatch(fname, p) for p in self.patterns)
+        checked: set[tuple[str, bool]] = set()
+        # (path, is a constraints file, where it was included from). Indexed
+        # files come first; included files are queued behind them.
+        queue: collections.deque[tuple[str, bool, Optional[tuple[str, int, str]]]] = (
+            collections.deque(
+                (os.path.join(dir_path, fname), False, None)
+                for dir_path in sorted(index.keys())
+                for fname in sorted(index[dir_path])
+                if any(fnmatch.fnmatch(fname, p) for p in self.patterns)
+            )
         )
 
+        def add(path: str, lineno: int, message: str, integrity: bool) -> None:
+            findings.append(
+                Finding(
+                    checker=self.name,
+                    path=path,
+                    line=lineno,
+                    message=message,
+                    integrity=integrity,
+                )
+            )
+
         while queue:
-            full_path = queue.popleft()
-            real = os.path.realpath(full_path)
-            if real in checked:
+            full_path, constraints, origin = queue.popleft()
+            key = (os.path.realpath(full_path), constraints)
+            if key in checked:
                 continue
-            checked.add(real)
+            checked.add(key)
             rel_path = os.path.relpath(full_path, root)
             try:
                 with open(full_path, "r", encoding="utf-8-sig", errors="replace") as fh:
                     raw_lines = fh.readlines()
             except OSError:
+                if origin is not None:
+                    add(
+                        origin[0],
+                        origin[1],
+                        "{} could not be read".format(origin[2]),
+                        True,
+                    )
                 continue
 
             for text, lineno in _logical_lines(raw_lines):
                 line = _split_line(text)
                 if line is None:
                     continue
-                for target in line.values("requirement"):
-                    path, problem = self._resolve_include(full_path, target, root_real)
-                    if problem:
-                        findings.append(
-                            Finding(
-                                checker=self.name,
-                                path=rel_path,
-                                line=lineno,
-                                message="-r '{}' {}".format(target, problem),
-                                integrity=True,
+                if line.requirement:
+                    if not constraints:
+                        for result in _analyze_line(text, line):
+                            add(
+                                rel_path,
+                                lineno,
+                                self._message(result),
+                                result.kind != "pin_error",
                             )
-                        )
-                    elif path is not None:
-                        queue.append(path)
-                for result in _analyze_line(text):
-                    findings.append(
-                        Finding(
-                            checker=self.name,
-                            path=rel_path,
-                            line=lineno,
-                            message=self._message(result),
-                            integrity=result.kind != "pin_error",
-                        )
+                    continue
+                # pip includes at most one file per option line: the first
+                # -r (a requirements file, even inside a constraints file),
+                # else the first -c.
+                includes = line.values("requirement")
+                nested_constraints = not includes
+                if nested_constraints:
+                    includes = line.values("constraint")
+                if includes:
+                    flag = "-c" if nested_constraints else "-r"
+                    label = "{} '{}'".format(flag, includes[0])
+                    path, problem = self._resolve_include(
+                        full_path, includes[0], root_real
                     )
+                    if problem:
+                        add(rel_path, lineno, "{} {}".format(label, problem), True)
+                    elif path is not None:
+                        queue.append(
+                            (path, nested_constraints, (rel_path, lineno, label))
+                        )
+                if not constraints:
+                    for result in _analyze_line(text, line):
+                        add(
+                            rel_path,
+                            lineno,
+                            self._message(result),
+                            result.kind != "pin_error",
+                        )
 
         findings.sort(key=lambda f: (f.path, f.line))
         return findings
@@ -350,6 +412,11 @@ class RequirementsChecker(Checker):
         if result.kind == "pin_error":
             return "'{}' is not pinned with ==; use package==version".format(
                 result.package
+            )
+        if result.kind == "unverifiable":
+            return (
+                "'{}' uses an environment variable, so the requirement cannot be"
+                " verified".format(result.package)
             )
         if result.kind == "hash_missing":
             return (
@@ -367,14 +434,17 @@ class RequirementsChecker(Checker):
         including: str, target: str, root_real: str
     ) -> tuple[Optional[str], Optional[str]]:
         """Return (path to check, None) or (None, why it cannot be checked)."""
-        if _URL_RE.match(target):
+        scheme = _INCLUDE_SCHEME_RE.match(target)
+        if scheme and scheme.group(1).lower() != "file":
             return None, "is fetched from a URL, so its contents cannot be checked"
         if _ENV_VAR_RE.search(target):
             return None, "uses an environment variable, so the file cannot be checked"
+        if scheme:
+            target = urllib.parse.unquote(urllib.parse.urlsplit(target).path)
         path = os.path.join(os.path.dirname(including), target)
         real = os.path.realpath(path)
         if real != root_real and not real.startswith(root_real.rstrip(os.sep) + os.sep):
             return None, "is outside the scanned directory, so it cannot be checked"
-        if not os.path.isfile(real):
+        if not os.path.exists(real):
             return None, "does not exist, so its requirements cannot be checked"
         return path, None

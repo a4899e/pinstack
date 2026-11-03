@@ -508,3 +508,62 @@ class TestRequirementsPipGrammar:
                 "'requests' is not pinned with ==; use package==version",
             )
         ]
+
+
+class TestRequirementsPipSemantics:
+    """Second local review of L2."""
+
+    def test_r_inside_constraints_file_is_followed(self):
+        """pip reads -r inside a constraints file as a real requirements file."""
+        findings = _req(
+            "-c constraints.txt\n",
+            {"constraints.txt": "urllib3<3\n-r extra.txt\n", "extra.txt": "evil\n"},
+        )
+        assert findings == [
+            ("extra.txt", 1, "'evil' is not pinned with ==; use package==version")
+        ]
+
+    def test_environment_variable_requirement(self):
+        findings = _req("${PKG}==1.0 " + _H + "\n")
+        assert [m for _, _, m in findings] == [
+            "'${PKG}==1.0' uses an environment variable, so the requirement cannot"
+            " be verified"
+        ]
+
+    def test_local_wheel_needs_a_hash(self):
+        assert [m for _, _, m in _req("/tmp/evil.whl\n")] == [
+            "'/tmp/evil.whl' is not pinned with ==; use package==version"
+        ]
+        assert _req("./wheels/pkg-1.0-py3-none-any.whl " + _H + "\n") == []
+
+    def test_hashed_bare_url_is_pinned(self):
+        assert _req("https://x.invalid/foo-1.0.tar.gz " + _H + "\n") == []
+
+    def test_spaces_around_exact_operator(self):
+        assert _req("foo == 1.0 " + _H + "\n") == []
+
+    def test_only_first_include_per_line(self):
+        findings = _req(
+            "-r a.txt -r b.txt\n", {"a.txt": "flask\n", "b.txt": "django\n"}
+        )
+        assert [p for p, _, _ in findings] == ["a.txt"]
+
+    def test_requirement_line_does_not_include(self):
+        """pip ignores -r on a line that is itself a requirement."""
+        findings = _req("foo==1.0 " + _H + " -r missing.txt\n")
+        assert findings == []
+
+    def test_file_scheme_include_is_a_path(self):
+        findings = _req("-r file:extra.txt\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_unreadable_include_is_reported(self):
+        d = tempfile.mkdtemp()
+        try:
+            os.mkdir(os.path.join(d, "adir"))
+            with open(os.path.join(d, "requirements.txt"), "w") as fh:
+                fh.write("-r adir\n")
+            findings = RequirementsChecker().check({d: {"requirements.txt"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == ["-r 'adir' could not be read"]
