@@ -3,5 +3,5 @@ name: my-app
 version: 1.0.0
 dependencies:
   - name: redis
-    version: "17.x.x"
+    version: "17.3.7"
     repository: "https://charts.bitnami.com/bitnami"
