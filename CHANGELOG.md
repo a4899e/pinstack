@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Python versions
+
+- **Python 3.14 is supported.** CI now runs lint, the security checks and the tests on 3.14 as well as 3.11, 3.12 and 3.13, and the package lists 3.14 in its classifiers.
+
 ## 0.4.0 (2026-11-03)
 
 This release adds one option, `--build-context`, for Dockerfiles that use BuildKit named contexts. Nothing else changes: if you don't pass the option, 0.4.0 reports exactly what 0.3.0 does.
