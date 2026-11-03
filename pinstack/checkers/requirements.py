@@ -83,19 +83,26 @@ _PATH_RE = re.compile(
 # Algorithms pip accepts for --hash (pip._internal.utils.hashes.STRONG_HASHES).
 _PIP_HASH_ALGORITHMS = ("sha256", "sha384", "sha512")
 
-# The options of a requirements file line. Each long name maps to whether
-# it takes a value; short names map to their long name.
+# The options of a requirements file line, as pip 26.2 defines them
+# (pip._internal.req.req_file SUPPORTED_OPTIONS and SUPPORTED_OPTIONS_REQ),
+# plus --global-option, which older pip still accepts. Each long name maps
+# to whether it takes a value; short names map to their long name. Aliases
+# map to the same meaning: --pypi-url is --index-url.
 _LONG_OPTIONS = {
     "requirement": True,
     "constraint": True,
     "editable": True,
     "index-url": True,
+    "pypi-url": True,
     "extra-index-url": True,
     "no-index": False,
     "find-links": True,
     "pre": False,
+    "all-releases": True,
+    "only-final": True,
     "prefer-binary": False,
     "require-hashes": False,
+    "no-require-hashes": False,
     "trusted-host": True,
     "use-feature": True,
     "only-binary": True,
@@ -104,13 +111,13 @@ _LONG_OPTIONS = {
     "global-option": True,
     "config-settings": True,
 }
-_SHORT_OPTIONS = {
+_SHORT_OPTIONS: dict[str, str] = {
     "r": "requirement",
     "c": "constraint",
     "e": "editable",
     "i": "index-url",
     "f": "find-links",
-    "Z": None,  # --always-unzip, accepted and ignored by older pip
+    "C": "config-settings",
 }
 
 
@@ -120,6 +127,8 @@ class _Line:
 
     requirement: str
     options: list[tuple[str, str]] = field(default_factory=list)  # (long name, value)
+    # Why the options could not all be read, if they could not.
+    option_problem: Optional[str] = None
 
     def values(self, name: str) -> list[str]:
         return [value for opt, value in self.options if opt == name]
@@ -164,48 +173,60 @@ def _logical_lines(raw_lines: list[str]) -> list[tuple[str, int]]:
     return logical
 
 
-def _parse_options(tokens: list[str]) -> list[tuple[str, str]]:
+def _parse_options(tokens: list[str]) -> tuple[list[tuple[str, str]], Optional[str]]:
     """Parse option tokens the way optparse does for a requirements line.
 
-    Parsing stops at the first token pip would reject (an unknown option or
-    a missing value); pip refuses such a file, so nothing after it installs.
+    Returns the options and, if parsing had to stop early, why. An argument that
+    is not an option is skipped, as optparse does with positional arguments;
+    ``--`` ends the options. An unknown or ambiguous option, or one missing
+    its value, stops parsing: pip 26.2 refuses such a line, but another pip
+    version may accept it and go on to read an include after it, so the
+    caller reports it rather than treating the line as understood.
     """
     options: list[tuple[str, str]] = []
     i = 0
     while i < len(tokens):
-        token = tokens[i]
+        arg = tokens[i]
         i += 1
-        if token.startswith("--"):
-            name, sep, value = token[2:].partition("=")
+        if arg == "--":
+            break
+        if arg.startswith("--"):
+            name, sep, value = arg[2:].partition("=")
             matches = [o for o in _LONG_OPTIONS if o == name] or [
                 o for o in _LONG_OPTIONS if o.startswith(name)
             ]
             if len(matches) != 1:
-                break
+                kind = "ambiguous" if matches else "unknown"
+                return options, "{} option '{}'".format(kind, arg)
             name = matches[0]
             if not _LONG_OPTIONS[name]:
                 options.append((name, ""))
                 continue
             if not sep:
                 if i >= len(tokens):
-                    break
+                    return options, "option '{}' has no value".format(arg)
                 value = tokens[i]
                 i += 1
             options.append((name, value))
-        elif token.startswith("-") and len(token) >= 2 and token[1] in _SHORT_OPTIONS:
-            long_name = _SHORT_OPTIONS[token[1]]
-            if long_name is None:
-                continue
-            value = token[2:]
+        elif arg.startswith("-") and len(arg) >= 2:
+            if arg[1] not in _SHORT_OPTIONS:
+                return options, "unknown option '{}'".format(arg)
+            long_name = _SHORT_OPTIONS[arg[1]]
+            value = arg[2:]
             if not value:
                 if i >= len(tokens):
-                    break
+                    return options, "option '{}' has no value".format(arg)
                 value = tokens[i]
                 i += 1
             options.append((long_name, value))
-        else:
-            break
-    return options
+        elif _ENV_VAR_RE.search(arg):
+            # pip expands variables before it splits the line, so one here
+            # may turn into options (EXTRA="-r evil.txt").
+            return options, "environment variable '{}' outside an option value".format(
+                arg
+            )
+        # Anything else is a positional argument, which pip ignores.
+    return options, None
 
 
 def _split_line(text: str) -> Optional[_Line]:
@@ -222,11 +243,18 @@ def _split_line(text: str) -> Optional[_Line]:
             requirement = " ".join(tokens[:index]).strip()
             option_text = " ".join(tokens[index:])
             break
+    split_problem = None
     try:
         option_tokens = shlex.split(option_text)
     except ValueError:
         option_tokens = option_text.split()
-    return _Line(requirement=requirement, options=_parse_options(option_tokens))
+        split_problem = "options with an unclosed quote"
+    options, problem = _parse_options(option_tokens)
+    return _Line(
+        requirement=requirement,
+        options=options,
+        option_problem=split_problem or problem,
+    )
 
 
 def _hash_problem(value: str) -> Optional[str]:
@@ -366,6 +394,17 @@ class RequirementsChecker(Checker):
                 line = _split_line(text)
                 if line is None:
                     continue
+                if line.option_problem:
+                    # Fail closed: an option pinstack cannot read may hide an
+                    # include or a requirement after it.
+                    add(
+                        rel_path,
+                        lineno,
+                        "line has {}, so pinstack cannot read the rest of it;"
+                        " use only the options pip documents for"
+                        " requirements files".format(line.option_problem),
+                        True,
+                    )
                 if line.requirement:
                     if not constraints:
                         for result in _analyze_line(text, line):

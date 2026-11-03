@@ -567,3 +567,97 @@ class TestRequirementsPipSemantics:
         finally:
             shutil.rmtree(d, ignore_errors=True)
         assert [f.message for f in findings] == ["-r 'adir' could not be read"]
+
+
+class TestRequirementsOptionAliases:
+    """Codex review of L2: an option pinstack misreads must not hide an include."""
+
+    def test_repro_pypi_url_alias(self):
+        """--pypi-url is pip's alias for --index-url; the -r after it is followed."""
+        assert _scan("pypi_url_alias") == [
+            (
+                "reqs/base.txt",
+                1,
+                "'requests' is not pinned with ==; use package==version",
+            )
+        ]
+
+    def test_short_config_settings(self):
+        findings = _req("-C key=value -r extra.txt\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_positional_token_does_not_stop_options(self):
+        """optparse skips a stray argument, so pip still reads the -r after it."""
+        findings = _req("--pre stray -r extra.txt\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_double_dash_ends_options(self):
+        """After --, pip reads -r as a positional argument and ignores it."""
+        assert _req("--pre -- -r extra.txt\n", {"extra.txt": "flask\n"}) == []
+
+    def test_unknown_option_is_reported(self):
+        assert _req("--install-option=x -r extra.txt\n", {"extra.txt": "f\n"}) == [
+            (
+                "requirements.txt",
+                1,
+                "line has unknown option '--install-option=x', so pinstack cannot"
+                " read the rest of it; use only the options pip documents for"
+                " requirements files",
+            )
+        ]
+
+    def test_ambiguous_and_valueless_options_are_reported(self):
+        assert "ambiguous option '--p'" in _req("--p -r extra.txt\n")[0][2]
+        assert "option '-r' has no value" in _req("--pre -r\n")[0][2]
+
+    def test_unknown_option_after_requirement_is_reported(self):
+        findings = _req("foo==1.0 " + _H + " --bogus\n")
+        assert [m for _, _, m in findings] == [
+            "line has unknown option '--bogus', so pinstack cannot read the rest"
+            " of it; use only the options pip documents for requirements files"
+        ]
+
+
+class TestRequirementsOptionReview:
+    """Local review of the option-parser fix."""
+
+    def test_environment_variable_in_positional_slot(self):
+        """pip expands ${EXTRA} before splitting, so it may hold "-r evil.txt"."""
+        assert _req("--pre ${EXTRA}\n") == [
+            (
+                "requirements.txt",
+                1,
+                "line has environment variable '${EXTRA}' outside an option value,"
+                " so pinstack cannot read the rest of it; use only the options pip"
+                " documents for requirements files",
+            )
+        ]
+
+    def test_environment_variable_in_option_value_is_allowed(self):
+        assert _req("--extra-index-url ${PRIVATE_URL}\n") == []
+
+    def test_removed_short_option_is_reported(self):
+        assert "unknown option '-Zr'" in _req("-Zr extra.txt\n")[0][2]
+
+    def test_unclosed_quote_is_reported(self):
+        assert "options with an unclosed quote" in _req("--pre 'x -r a.txt\n")[0][2]
+
+    def test_pypi_url_equals_and_abbreviation(self):
+        for line in (
+            "--pypi-url=https://x.invalid -r extra.txt\n",
+            "--pypi https://x.invalid -r extra.txt\n",
+        ):
+            assert [p for p, _, _ in _req(line, {"extra.txt": "flask\n"})] == [
+                "extra.txt"
+            ]
+
+    def test_lone_dash_is_positional(self):
+        findings = _req("--pre - -r extra.txt\n", {"extra.txt": "flask\n"})
+        assert [p for p, _, _ in findings] == ["extra.txt"]
+
+    def test_option_problem_in_constraints_file(self):
+        """pip reads options in a -c file the same way, so a problem is reported."""
+        findings = _req("-c constraints.txt\n", {"constraints.txt": "--bogus\n"})
+        assert [(p, m.split(",")[0]) for p, _, m in findings] == [
+            ("constraints.txt", "line has unknown option '--bogus'")
+        ]
