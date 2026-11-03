@@ -1,0 +1,21 @@
+dependencies:
+- name: redis
+  repository: https://charts.bitnami.com/bitnami
+  version: 1.8.2
+- name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 12.1.6
+- name: nginx
+  repository: oci://registry-1.docker.io/bitnamicharts
+  version: 2.1.4
+- name: mysql
+  repository: https://charts.bitnami.com/bitnami
+  version: 4.2.0
+- name: exact
+  repository: https://charts.bitnami.com/bitnami
+  version: 5.0.0
+- name: local
+  repository: file://../local
+  version: 0.1.0
+digest: sha256:1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a
+generated: "2026-11-02T12:00:00.000000000Z"

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: my-app
+version: 1.0.0
+dependencies:
+  - name: redis
+    version: 1.x
+    repository: https://charts.bitnami.com/bitnami
+  - name: postgresql
+    version: ">=1.0"
+    repository: https://charts.bitnami.com/bitnami
+  - repository: oci://registry-1.docker.io/bitnamicharts
+    name: nginx
+    version: ^2.1.0  # caret range
+  - name: mysql
+    version: '4.2'
+    repository: https://charts.bitnami.com/bitnami
+  - name: exact
+    version: "5.0.0"
+    repository: https://charts.bitnami.com/bitnami
+  - name: local
+    repository: file://../local
