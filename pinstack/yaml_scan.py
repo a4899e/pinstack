@@ -31,7 +31,7 @@ from __future__ import annotations
 import bisect
 import re
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Optional
 
 # A sequence item marker in a key path.
 ITEM = "-"
