@@ -1382,10 +1382,9 @@ class TestWildcardVersions:
         assert not _check_poetry_version("x", "==1.2.3")[0]
 
     def test_requirements_wildcard_is_a_pin_error(self):
-        from pinstack.checkers.requirements import _check_line
+        from pinstack.checkers.requirements import _analyze_line
 
-        skip, pin_error, hash_warn, _ = _check_line("requests==2.*")
-        assert pin_error and not hash_warn
+        assert [r.kind for r in _analyze_line("requests==2.*")] == ["pin_error"]
 
 
 class TestInlineTableProject:

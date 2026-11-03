@@ -1,0 +1,12 @@
+name: test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - &checkout
+            uses: actions/checkout@v4
+    steps:
+      - *checkout
