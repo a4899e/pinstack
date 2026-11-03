@@ -314,7 +314,9 @@ class TestHelmVersionRanges:
         findings = _chart("dependencies: [{name: redis, version: ^1.0.0}]\n")
         assert [m for _, _, m in findings] == [
             "dependencies are written in flow style, which pinstack cannot read;"
-            " write them as a block list"
+            " write them as a block list",
+            "Chart.yaml declares dependencies but Chart.lock is missing;"
+            " run 'helm dependency update'",
         ]
 
 
@@ -339,3 +341,88 @@ class TestHelmDigestIsNotIntegrity:
         sarif = json.loads(format_sarif(_scan("bad_digest")))
         text = sarif["runs"][0]["results"][0]["message"]["text"]
         assert "NIST" not in text
+
+
+_LOCK_REDIS = (
+    "dependencies:\n- name: redis\n  repository: https://x.invalid\n"
+    "  version: 1.0.0\ndigest: sha256:x\n"
+)
+
+
+class TestHelmReviewFollowUps:
+    """Local review of the L5 change."""
+
+    def test_nested_lists_stay_inside_their_dependency(self):
+        findings = _chart(
+            "dependencies:\n"
+            "  - name: redis\n"
+            "    repository: https://x.invalid\n"
+            "    tags:\n"
+            "      - cache\n"
+            "    import-values:\n"
+            "      - child: a\n"
+            "        parent: b\n"
+            "    version: 1.0.0\n",
+            _LOCK_REDIS,
+        )
+        assert findings == []
+
+    def test_tab_after_dash(self):
+        findings = _chart(
+            "dependencies:\n  -\tname: redis\n    repository: https://x.invalid\n"
+            "    version: ^1.0.0\n",
+            _LOCK_REDIS,
+        )
+        assert [m for _, _, m in findings] == [
+            "dependency 'redis' uses version range '^1.0.0'; pin to an exact version"
+        ]
+
+    def test_flow_style_item(self):
+        findings = _chart(
+            "dependencies:\n  - {name: redis, version: ^1.0.0, repository: https://x}\n",
+            _LOCK_REDIS,
+        )
+        assert [m for _, _, m in findings] == [
+            "dependencies are written in flow style, which pinstack cannot read;"
+            " write them as a block list"
+        ]
+
+    def test_quoted_keys(self):
+        findings = _chart(
+            'dependencies:\n  - "name": redis\n    "repository": https://x.invalid\n'
+            '    "version": 1.0.0\n',
+            _LOCK_REDIS,
+        )
+        assert findings == []
+
+    def test_lock_at_a_different_exact_version_is_stale(self):
+        findings = _chart(
+            "dependencies:\n  - name: redis\n    repository: https://x.invalid\n"
+            "    version: 2.0.0\n",
+            _LOCK_REDIS,
+        )
+        assert [m for _, _, m in findings] == [
+            "Chart.lock is stale: 'redis' is locked at 1.0.0 but Chart.yaml asks"
+            " for 2.0.0; run 'helm dependency update'"
+        ]
+
+    def test_vendored_subchart_without_repository_is_exempt(self):
+        findings = _chart(
+            "dependencies:\n  - name: sub\n    version: ^0.1.0\n",
+            "dependencies:\n- name: sub\n  version: 0.1.0\ndigest: sha256:x\n",
+        )
+        assert findings == []
+
+    def test_unreadable_lock_is_reported(self):
+        d = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(d, "Chart.yaml"), "w") as fh:
+                fh.write(
+                    "dependencies:\n  - name: redis\n    repository: https://x\n"
+                    "    version: 1.0.0\n"
+                )
+            os.mkdir(os.path.join(d, "Chart.lock"))
+            findings = HelmChecker().check({d: {"Chart.yaml", "Chart.lock"}}, d)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        assert [f.message for f in findings] == ["Chart.lock could not be read"]
