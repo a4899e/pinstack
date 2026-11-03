@@ -15,6 +15,16 @@ by an earlier ``FROM ... AS <name>`` (or, for ``--from``, a stage's numeric
 index). Only those are skipped. A bare word that is not a declared stage, such
 as ``alpine``, is an image pulled from Docker Hub at ``:latest``.
 
+A build can also supply a BuildKit named context, with ``docker buildx build
+--build-context <name>=<source>``, and refer to it as ``<name>`` wherever a
+stage could go. The Dockerfile alone cannot show that: built without the flag,
+the same name is pulled from Docker Hub. So a named context is skipped only when
+the scan declares it with pinstack's ``--build-context <name>``, which belongs
+next to the build command that supplies it. Declared names follow the stage-name
+rule, so a declaration cannot stand in for a tagged image such as
+``alpine:3.18``. The ``# syntax=`` frontend never resolves to a named context
+and always needs a digest.
+
 A reference containing ``$`` is expanded from ``ARG`` values that
 ``--build-arg`` can override at build time, so the Dockerfile alone cannot show
 which image is pulled. Those references are reported rather than trusted.
@@ -69,6 +79,25 @@ _FLAGS_RE = re.compile(r"^(COPY|ADD|RUN)((?:\s+--\S+)*)", re.IGNORECASE)
 # a delimiter word with no further ``<``. The delimiter may be quoted in whole
 # or in part and may contain punctuation (``<<EOF.txt``, ``3<<"EOF"``).
 _HEREDOC_WORD_RE = re.compile(r"^\d*<<(-?)([^<]+)$")
+# BuildKit's rule for a stage name, which a declared named context must follow.
+_STAGE_NAME_RE = re.compile(r"^[a-z][a-z0-9._-]*$")
+
+
+def build_context_name(name: str) -> str:
+    """Return a declared named-context name in the form stages are compared in.
+
+    :param name: A name passed to ``--build-context``.
+    :returns: The name, stripped and lower-cased.
+    :raises ValueError: when the name is not a valid stage name, for example an
+        image reference such as ``alpine:3.18`` or ``ghcr.io/org/img``.
+    """
+    lowered = name.strip().lower()
+    if not _STAGE_NAME_RE.match(lowered):
+        raise ValueError(
+            "'{}' is not a valid build context name: use letters, digits, '.',"
+            " '_' and '-', starting with a letter".format(name)
+        )
+    return lowered
 
 
 def _read_directives(lines: list[str]) -> dict[str, tuple[int, str]]:
@@ -287,10 +316,13 @@ class DockerfileChecker(Checker):
         "*.dockerfile",
         "*.Dockerfile",
     ]
+    #: Lower-cased named contexts the build supplies (``--build-context``).
+    #: Each is treated like a stage declared before the first instruction.
+    build_contexts: frozenset[str] = frozenset()
 
     def _check_file(self, rel_path: str, lines: list[str]) -> list[Finding]:
         findings: list[Finding] = []
-        stages: set[str] = set()
+        stages: set[str] = set(self.build_contexts)
 
         def check(
             lineno: int,
