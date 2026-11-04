@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (2026-11-04)
+
+This release changes no behavior. It corrects the license text and package metadata, and adds Python 3.14 to the supported versions. pinstack still has no runtime dependencies and still runs on Python 3.9 and later.
+
+### Licensing and metadata
+
+- **The license text is now the canonical Apache License 2.0.** Earlier releases shipped a `LICENSE` that paraphrased several of the license's definitions ("Work", "Contribution", "Contributor") instead of reproducing them verbatim. It now matches the official text, and GitHub identifies the license correctly.
+- **A `NOTICE` file names the copyright holder** (Copyright 2026 Trevor Tonn). Wheels and sdists ship it with `LICENSE`.
+- **The package author is now listed as Trevor Tonn** instead of `smthmlk`.
 
 ### Python versions
 
